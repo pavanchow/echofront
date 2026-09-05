@@ -1,0 +1,19 @@
+[package]
+name = "echofront"
+version = "0.1.0"
+edition = "2021"
+description = "A resilience-focused L7 reverse proxy and load balancer with health checks, circuit breaking, outlier ejection, retries and failover, all deterministic over an injected clock."
+license = "MIT"
+repository = "https://github.com/pavanchow/echofront"
+
+[[bin]]
+name = "echofront"
+path = "src/bin/echofront.rs"
+
+[lib]
+name = "echofront"
+path = "src/lib.rs"
+
+[profile.release]
+opt-level = 3
+lto = true
