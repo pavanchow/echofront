@@ -1,12 +1,848 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>echofront</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Echofront Playground</title>
+<style>
+:root {
+  --bg: #f2f2f7;
+  --card: #ffffff;
+  --card-2: #f7f7fa;
+  --text: #1c1c1e;
+  --muted: #6e6e73;
+  --border: #e2e2e7;
+  --accent: #0a84ff;
+  --accent-soft: rgba(10, 132, 255, 0.12);
+  --green: #34c759;
+  --green-soft: rgba(52, 199, 89, 0.15);
+  --amber: #ff9f0a;
+  --amber-soft: rgba(255, 159, 10, 0.16);
+  --red: #ff3b30;
+  --red-soft: rgba(255, 59, 48, 0.15);
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.05);
+  --radius: 16px;
+  --radius-sm: 10px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --card: #1c1c1e;
+    --card-2: #2c2c2e;
+    --text: #f5f5f7;
+    --muted: #98989d;
+    --border: #38383a;
+    --accent: #0a84ff;
+    --accent-soft: rgba(10, 132, 255, 0.22);
+    --green: #30d158;
+    --green-soft: rgba(48, 209, 88, 0.20);
+    --amber: #ffd60a;
+    --amber-soft: rgba(255, 214, 10, 0.18);
+    --red: #ff453a;
+    --red-soft: rgba(255, 69, 58, 0.22);
+    --shadow: 0 1px 3px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.5);
+  }
+  body {
+    background: var(--bg);
+    color: var(--text);
+  }
+}
+
+.wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+}
+
+header.hero {
+  text-align: center;
+  padding: 20px 0 8px;
+}
+header.hero h1 {
+  font-size: 40px;
+  margin: 0 0 6px;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+header.hero p {
+  margin: 0 auto;
+  max-width: 640px;
+  color: var(--muted);
+  font-size: 17px;
+}
+header.hero a.ghlink {
+  display: inline-block;
+  margin-top: 12px;
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 15px;
+}
+header.hero a.ghlink:hover { text-decoration: underline; }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 22px;
+  margin: 20px 0;
+}
+.card h2 {
+  margin: 0 0 14px;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+}
+.card h3 {
+  margin: 18px 0 8px;
+  font-size: 16px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.howto ul { padding-left: 20px; margin: 8px 0; }
+.howto li { margin: 6px 0; }
+.howto ol { padding-left: 22px; margin: 8px 0; }
+.howto code {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 13px;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  align-items: flex-end;
+}
+.control-group { display: flex; flex-direction: column; gap: 6px; }
+.control-group label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.seg {
+  display: inline-flex;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 3px;
+  gap: 2px;
+}
+.seg button {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.seg button.active {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+button.btn {
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--text);
+  padding: 10px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  cursor: pointer;
+  font-weight: 500;
+}
+button.btn:hover { background: var(--accent-soft); }
+button.btn.primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: transparent;
+}
+button.btn.primary:hover { opacity: 0.92; }
+button.btn.danger { color: var(--red); }
+
+input.key {
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--text);
+  padding: 9px 12px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  width: 160px;
+}
+input.key:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+
+.hidden { display: none; }
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 12px;
+}
+.stat {
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  text-align: center;
+}
+.stat .num { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; }
+.stat .lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+
+.nodes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+.node {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  box-shadow: var(--shadow);
+}
+.node.unavailable { opacity: 0.62; }
+.node .top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.node .name { font-size: 20px; font-weight: 700; }
+.node .weight { font-size: 12px; color: var(--muted); }
+.badges { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
+.badge.closed { background: var(--green-soft); color: var(--green); }
+.badge.half { background: var(--amber-soft); color: var(--amber); }
+.badge.open { background: var(--red-soft); color: var(--red); }
+.badge.ejected { background: var(--red-soft); color: var(--red); }
+.badge.unhealthy { background: var(--red-soft); color: var(--red); }
+.node .metrics { font-size: 13px; color: var(--muted); margin: 8px 0; display: flex; justify-content: space-between; }
+.node .metrics b { color: var(--text); }
+.bar {
+  height: 8px;
+  background: var(--card-2);
+  border-radius: 999px;
+  overflow: hidden;
+  margin: 8px 0 12px;
+}
+.bar > span { display: block; height: 100%; background: var(--accent); width: 0%; transition: width 0.25s ease; }
+.node button.toggle {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--card-2);
+  color: var(--text);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  font-weight: 600;
+}
+.node button.toggle.failing { background: var(--red-soft); color: var(--red); border-color: transparent; }
+
+.log {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  max-height: 340px;
+  overflow-y: auto;
+  background: var(--card-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+}
+.log .row { padding: 3px 0; border-bottom: 1px solid var(--border); display: flex; gap: 10px; flex-wrap: wrap; }
+.log .row:last-child { border-bottom: none; }
+.log .t { color: var(--muted); min-width: 66px; }
+.log .code200 { color: var(--green); font-weight: 700; }
+.log .code500 { color: var(--red); font-weight: 700; }
+.log .code503 { color: var(--amber); font-weight: 700; }
+.log .note { color: var(--muted); }
+
+@media (max-width: 860px) {
+  .nodes { grid-template-columns: repeat(2, 1fr); }
+  .stats { grid-template-columns: repeat(3, 1fr); }
+  header.hero h1 { font-size: 32px; }
+}
+@media (max-width: 480px) {
+  .nodes { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
 </head>
 <body>
-<h1>echofront</h1>
-<p>Site coming soon.</p>
-<p><a href="https://github.com/pavanchow/echofront">View repository</a></p>
+<div class="wrap">
+
+  <header class="hero">
+    <h1>Echofront</h1>
+    <p>A resilience focused layer 7 reverse proxy and load balancer. This playground is a faithful JavaScript reimplementation of the engine so you can watch load balancing, health, circuit breaking, retries, and failover behave in real time.</p>
+    <a class="ghlink" href="https://github.com/pavanchow/echofront" target="_blank" rel="noopener">github.com/pavanchow/echofront</a>
+  </header>
+
+  <section class="card howto">
+    <h2>How to use this playground</h2>
+    <p>Everything below is live. The clock advances on its own and every request flows through the same rules the real proxy uses. Here is what each control does.</p>
+    <ul>
+      <li><b>Strategy</b> picks how the proxy chooses a node: round robin, weighted (smooth weighted round robin), least connections, or sticky (consistent hashing). Choosing sticky reveals a key field.</li>
+      <li><b>Sticky key</b> is the value hashed onto the ring. The same key always lands on the same node until that node leaves the pool. Leave it empty and the stream auto cycles through user-1 to user-8.</li>
+      <li><b>Send 1 request</b> and <b>Send 10</b> fire traffic instantly. Send 10 is the fastest way to see the spread across nodes.</li>
+      <li><b>Start stream</b> sends one request roughly every 400 milliseconds of simulated time. <b>Stop stream</b> halts it.</li>
+      <li><b>Reset</b> clears all counters, breakers, ejections, and the log.</li>
+      <li>Each <b>node card</b> has a Healthy or Failing toggle. Flip a node to Failing and its responses start returning 500 and its health probe drops it.</li>
+      <li>The <b>breaker badge</b> shows Closed (green), Half Open (amber), or Open (red). The <b>Ejected</b> badge appears during passive outlier ejection.</li>
+    </ul>
+    <h3>Scenarios to try</h3>
+    <ul>
+      <li><b>See the spread:</b> pick a strategy, press Send 10, and compare the traffic share bars.</li>
+      <li><b>Watch an ejection:</b> mark a node Failing, start a stream, and watch five consecutive failures eject it for five seconds.</li>
+      <li><b>Watch a breaker open:</b> the same failing node opens its breaker after three consecutive failures, then stops receiving traffic.</li>
+      <li><b>Watch failover:</b> in the log, a failed attempt retries onto a different node using the retry budget.</li>
+      <li><b>Watch recovery:</b> flip the node back to Healthy, wait for the cooldown, and see the breaker go Half Open then Closed after two trial successes.</li>
+    </ul>
+    <h3>Guided tour</h3>
+    <ol>
+      <li>Leave the strategy on round robin and press <b>Send 10</b>. Notice traffic spread evenly across all four nodes.</li>
+      <li>Switch to <b>weighted</b> and press Send 10 again. Node C carries about twice the share because its weight is 2.</li>
+      <li>Switch to <b>least connections</b>, press <b>Start stream</b>, and watch in flight counts stay balanced.</li>
+      <li>While streaming, flip node C to <b>Failing</b>. Watch its breaker count failures and open, and each failed attempt fail over to another node.</li>
+      <li>Keep watching. After five straight failures node C shows the <b>Ejected</b> badge and leaves the pool entirely.</li>
+      <li>Flip node C back to <b>Healthy</b>. After the ejection window and the breaker cooldown it becomes <b>Half Open</b>, takes trial requests, and returns to <b>Closed</b>.</li>
+      <li>Switch to <b>sticky</b>, type a key like user-3, and press Send 1 a few times. It sticks to one node. Fail that node and only its keys remap.</li>
+    </ol>
+  </section>
+
+  <section class="card">
+    <h2>Controls</h2>
+    <div class="controls">
+      <div class="control-group">
+        <label>Strategy</label>
+        <div class="seg" id="strategySeg">
+          <button data-s="round-robin" class="active">Round robin</button>
+          <button data-s="weighted">Weighted</button>
+          <button data-s="least-conn">Least conn</button>
+          <button data-s="sticky">Sticky</button>
+        </div>
+      </div>
+      <div class="control-group hidden" id="keyGroup">
+        <label>Sticky key</label>
+        <input class="key" id="keyInput" placeholder="user-3 (auto if empty)">
+      </div>
+      <div class="control-group">
+        <label>Traffic</label>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn primary" id="send1">Send 1 request</button>
+          <button class="btn" id="send10">Send 10</button>
+          <button class="btn" id="streamBtn">Start stream</button>
+        </div>
+      </div>
+      <div class="control-group">
+        <label>Clock</label>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn" id="tickBtn">Advance 1s</button>
+          <button class="btn danger" id="resetBtn">Reset</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Live stats</h2>
+    <div class="stats">
+      <div class="stat"><div class="num" id="s-total">0</div><div class="lbl">Requests</div></div>
+      <div class="stat"><div class="num" id="s-success">0</div><div class="lbl">Successes</div></div>
+      <div class="stat"><div class="num" id="s-fail">0</div><div class="lbl">Failures</div></div>
+      <div class="stat"><div class="num" id="s-retry">0</div><div class="lbl">Retries</div></div>
+      <div class="stat"><div class="num" id="s-failover">0</div><div class="lbl">Failovers</div></div>
+      <div class="stat"><div class="num" id="s-tokens">0</div><div class="lbl">Retry tokens</div></div>
+      <div class="stat"><div class="num" id="s-clock">0</div><div class="lbl">Clock (ms)</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Backend pool</h2>
+    <div class="nodes" id="nodes"></div>
+  </section>
+
+  <section class="card">
+    <h2>Request log</h2>
+    <div class="log" id="log"></div>
+  </section>
+
+  <footer style="text-align:center; color:var(--muted); font-size:13px; padding-top:8px;">
+    Echofront playground. Source at <a class="ghlink" style="margin:0;" href="https://github.com/pavanchow/echofront" target="_blank" rel="noopener">github.com/pavanchow/echofront</a>
+  </footer>
+
+</div>
+
+<script>
+"use strict";
+
+// ---- Engine configuration (mirrors the Rust engine defaults) ----
+var FAILURE_THRESHOLD = 3;
+var SUCCESS_THRESHOLD = 2;
+var COOLDOWN_MS = 3000;
+var OUTLIER_FAILS = 5;
+var EJECT_MS = 5000;
+var RETRY_TOKEN_CAP = 10;
+var RETRY_DEPOSIT = 0.2;
+var TICK_MS = 200;          // simulated ms advanced per real tick
+var STREAM_INTERVAL_MS = 400; // simulated ms between streamed requests
+var LOG_CAP = 200;
+
+var now = 0;
+
+function makeBreaker() {
+  return { state: "Closed", consecFailures: 0, consecSuccesses: 0, since: 0 };
+}
+
+function makeNode(name, weight) {
+  return {
+    name: name,
+    weight: weight,
+    in_flight: 0,
+    healthy: true,
+    failing: false,
+    ejected: false,
+    ejected_until: 0,
+    breaker: makeBreaker(),
+    outlier: 0,
+    current_weight: 0,
+    tally: 0
+  };
+}
+
+var nodes = [];
+var stats = {};
+var retryTokens = 0;
+var reqId = 0;
+var pending = [];   // { req, node, completeAt, isRetry }
+var rrCursor = 0;
+var keyCounter = 0;
+var strategy = "round-robin";
+var streaming = false;
+var streamAccum = 0;
+
+function initState() {
+  nodes = [
+    makeNode("A", 1),
+    makeNode("B", 1),
+    makeNode("C", 2),
+    makeNode("D", 1)
+  ];
+  stats = { total: 0, successes: 0, failures: 0, retries: 0, failovers: 0, attempts: 0 };
+  retryTokens = 0;
+  reqId = 0;
+  pending = [];
+  rrCursor = 0;
+  keyCounter = 0;
+  now = 0;
+  streamAccum = 0;
+  logEntries = [];
+}
+
+// ---- Availability invariant ----
+function breakerCallable(node) {
+  return node.breaker.state === "Closed" || node.breaker.state === "HalfOpen";
+}
+function isAvailable(node) {
+  return node.healthy === true && node.ejected === false && breakerCallable(node);
+}
+function availableNodes(exclude) {
+  var out = [];
+  for (var i = 0; i < nodes.length; i++) {
+    var n = nodes[i];
+    if (!isAvailable(n)) continue;
+    if (exclude && exclude.indexOf(n.name) !== -1) continue;
+    out.push(n);
+  }
+  return out;
+}
+
+// ---- Load balancing strategies ----
+function selectRoundRobin(cands) {
+  var pick = cands[rrCursor % cands.length];
+  rrCursor++;
+  return pick;
+}
+
+function selectWeighted(cands) {
+  var total = 0;
+  for (var i = 0; i < cands.length; i++) total += cands[i].weight;
+  var best = null;
+  for (var j = 0; j < cands.length; j++) {
+    cands[j].current_weight += cands[j].weight;
+    if (best === null || cands[j].current_weight > best.current_weight) best = cands[j];
+  }
+  best.current_weight -= total;
+  return best;
+}
+
+function selectLeastConn(cands) {
+  var best = cands[0];
+  for (var i = 1; i < cands.length; i++) {
+    if (cands[i].in_flight < best.in_flight) best = cands[i];
+  }
+  return best;
+}
+
+// FNV-1a 64 bit hashing with BigInt
+var FNV_OFFSET = 14695981039346656037n;
+var FNV_PRIME = 1099511628211n;
+var MASK64 = (1n << 64n) - 1n;
+function fnv1a(str) {
+  var h = FNV_OFFSET;
+  for (var i = 0; i < str.length; i++) {
+    h ^= BigInt(str.charCodeAt(i) & 0xff);
+    h = (h * FNV_PRIME) & MASK64;
+  }
+  return h;
+}
+
+function selectSticky(cands, key) {
+  // Build ring with ~100 virtual nodes per candidate.
+  var ring = [];
+  for (var i = 0; i < cands.length; i++) {
+    var node = cands[i];
+    for (var v = 0; v < 100; v++) {
+      ring.push({ h: fnv1a(node.name + "#" + v), node: node });
+    }
+  }
+  ring.sort(function (a, b) { return a.h < b.h ? -1 : (a.h > b.h ? 1 : 0); });
+  var kh = fnv1a(key);
+  for (var r = 0; r < ring.length; r++) {
+    if (ring[r].h >= kh) return ring[r].node;
+  }
+  return ring[0].node;
+}
+
+function selectNode(exclude, key) {
+  var cands = availableNodes(exclude);
+  if (cands.length === 0) return null;
+  if (strategy === "round-robin") return selectRoundRobin(cands);
+  if (strategy === "weighted") return selectWeighted(cands);
+  if (strategy === "least-conn") return selectLeastConn(cands);
+  if (strategy === "sticky") return selectSticky(cands, key);
+  return cands[0];
+}
+
+// ---- Circuit breaker transitions ----
+function breakerOnFailure(node) {
+  var b = node.breaker;
+  if (b.state === "HalfOpen") {
+    b.state = "Open";
+    b.since = now;
+    b.consecSuccesses = 0;
+    logLine(null, "note", "breaker OPEN on " + node.name);
+    return;
+  }
+  b.consecFailures++;
+  if (b.consecFailures >= FAILURE_THRESHOLD && b.state === "Closed") {
+    b.state = "Open";
+    b.since = now;
+    logLine(null, "note", "breaker OPEN on " + node.name);
+  }
+}
+function breakerOnSuccess(node) {
+  var b = node.breaker;
+  if (b.state === "HalfOpen") {
+    b.consecSuccesses++;
+    if (b.consecSuccesses >= SUCCESS_THRESHOLD) {
+      b.state = "Closed";
+      b.consecFailures = 0;
+      b.consecSuccesses = 0;
+      logLine(null, "note", "breaker CLOSED on " + node.name);
+    }
+  } else {
+    b.consecFailures = 0;
+  }
+}
+function breakerTick(node) {
+  var b = node.breaker;
+  if (b.state === "Open" && (now - b.since) >= COOLDOWN_MS) {
+    b.state = "HalfOpen";
+    b.consecSuccesses = 0;
+    logLine(null, "note", node.name + " half-open");
+  }
+}
+
+// ---- Outlier ejection ----
+function ejectNode(node) {
+  node.ejected = true;
+  node.ejected_until = now + EJECT_MS;
+  logLine(null, "note", node.name + " ejected");
+}
+function ejectionTick(node) {
+  if (node.ejected && now >= node.ejected_until) {
+    node.ejected = false;
+    node.outlier = 0;
+    logLine(null, "note", node.name + " reinstated");
+  }
+}
+
+// ---- Request lifecycle ----
+function currentKey() {
+  if (strategy !== "sticky") return null;
+  var v = document.getElementById("keyInput").value.trim();
+  if (v.length > 0) return v;
+  keyCounter = (keyCounter % 8) + 1;
+  return "user-" + keyCounter;
+}
+
+function sendRequest(key) {
+  stats.total++;
+  retryTokens = Math.min(RETRY_TOKEN_CAP, retryTokens + RETRY_DEPOSIT);
+  var req = { id: ++reqId, key: key, tried: [] };
+  attempt(req);
+}
+
+function attempt(req) {
+  var node = selectNode(req.tried, req.key);
+  if (node === null) {
+    stats.failures++;
+    logLine(req, "503", "no available node");
+    return;
+  }
+  req.tried.push(node.name);
+  node.in_flight++;
+  stats.attempts++;
+  var latency = 350 + Math.floor(Math.random() * 550);
+  pending.push({ req: req, node: node, completeAt: now + latency });
+}
+
+function complete(entry) {
+  var node = entry.node;
+  var req = entry.req;
+  if (node.in_flight > 0) node.in_flight--;
+  node.tally++;
+
+  if (node.failing) {
+    // Failure path.
+    breakerOnFailure(node);
+    node.outlier++;
+    if (node.outlier >= OUTLIER_FAILS && !node.ejected) ejectNode(node);
+    logLine(req, "500", "on " + node.name);
+
+    var hasOther = availableNodes(req.tried).length > 0;
+    if (hasOther && retryTokens >= 1) {
+      retryTokens -= 1;
+      stats.retries++;
+      stats.failovers++;
+      logLine(req, "note", "retry, failover from " + node.name);
+      attempt(req);
+    } else {
+      stats.failures++;
+      logLine(req, "note", "request " + req.id + " exhausted");
+    }
+  } else {
+    // Success path.
+    breakerOnSuccess(node);
+    node.outlier = 0;
+    stats.successes++;
+    logLine(req, "200", "on " + node.name);
+  }
+}
+
+// ---- Clock tick ----
+function tick(ms) {
+  now += ms;
+
+  // process completions due
+  var due = [];
+  var remain = [];
+  for (var i = 0; i < pending.length; i++) {
+    if (pending[i].completeAt <= now) due.push(pending[i]);
+    else remain.push(pending[i]);
+  }
+  pending = remain;
+  for (var d = 0; d < due.length; d++) complete(due[d]);
+
+  // breaker + ejection transitions
+  for (var n = 0; n < nodes.length; n++) {
+    breakerTick(nodes[n]);
+    ejectionTick(nodes[n]);
+  }
+
+  // stream driver
+  if (streaming) {
+    streamAccum += ms;
+    while (streamAccum >= STREAM_INTERVAL_MS) {
+      streamAccum -= STREAM_INTERVAL_MS;
+      sendRequest(currentKey());
+    }
+  }
+
+  render();
+}
+
+// ---- Logging ----
+var logEntries = [];
+function logLine(req, kind, note) {
+  var e = {
+    t: now,
+    id: req ? req.id : null,
+    key: req ? req.key : null,
+    kind: kind,
+    note: note
+  };
+  logEntries.unshift(e);
+  if (logEntries.length > LOG_CAP) logEntries.length = LOG_CAP;
+}
+
+// ---- Rendering ----
+function badgeForBreaker(b) {
+  if (b.state === "Open") return '<span class="badge open">Breaker Open</span>';
+  if (b.state === "HalfOpen") return '<span class="badge half">Half Open</span>';
+  return '<span class="badge closed">Closed</span>';
+}
+
+function render() {
+  document.getElementById("s-total").textContent = stats.total;
+  document.getElementById("s-success").textContent = stats.successes;
+  document.getElementById("s-fail").textContent = stats.failures;
+  document.getElementById("s-retry").textContent = stats.retries;
+  document.getElementById("s-failover").textContent = stats.failovers;
+  document.getElementById("s-tokens").textContent = retryTokens.toFixed(1);
+  document.getElementById("s-clock").textContent = now;
+
+  var totalTally = 0;
+  for (var i = 0; i < nodes.length; i++) totalTally += nodes[i].tally;
+
+  var nodesEl = document.getElementById("nodes");
+  var html = "";
+  for (var j = 0; j < nodes.length; j++) {
+    var n = nodes[j];
+    var avail = isAvailable(n);
+    var share = totalTally > 0 ? Math.round((n.tally / totalTally) * 100) : 0;
+    var badges = "";
+    badges += badgeForBreaker(n.breaker);
+    if (n.ejected) badges += ' <span class="badge ejected">Ejected</span>';
+    if (!n.healthy) badges += ' <span class="badge unhealthy">Unhealthy</span>';
+
+    html += '<div class="node' + (avail ? "" : " unavailable") + '">';
+    html += '<div class="top"><span class="name">' + n.name + '</span>';
+    html += '<span class="weight">weight ' + n.weight + '</span></div>';
+    html += '<div class="badges">' + badges + '</div>';
+    html += '<div class="metrics"><span>in flight <b>' + n.in_flight + '</b></span>';
+    html += '<span>requests <b>' + n.tally + '</b></span></div>';
+    html += '<div class="bar"><span style="width:' + share + '%"></span></div>';
+    html += '<button class="toggle' + (n.failing ? " failing" : "") + '" data-node="' + n.name + '">';
+    html += n.failing ? "Failing (click to heal)" : "Healthy (click to fail)";
+    html += '</button></div>';
+  }
+  nodesEl.innerHTML = html;
+  // wire toggles
+  var toggles = nodesEl.querySelectorAll("button.toggle");
+  for (var t = 0; t < toggles.length; t++) {
+    toggles[t].addEventListener("click", onToggle);
+  }
+
+  var logEl = document.getElementById("log");
+  var lh = "";
+  for (var k = 0; k < logEntries.length; k++) {
+    var e = logEntries[k];
+    lh += '<div class="row"><span class="t">' + e.t + 'ms</span>';
+    if (e.kind === "200" || e.kind === "500" || e.kind === "503") {
+      lh += '<span class="code' + e.kind + '">' + e.kind + '</span>';
+    } else {
+      lh += '<span class="code200" style="visibility:hidden">---</span>';
+    }
+    var idtxt = e.id !== null ? ("#" + e.id) : "";
+    var keytxt = e.key ? (" " + e.key) : "";
+    lh += '<span>' + idtxt + keytxt + '</span>';
+    lh += '<span class="note">' + e.note + '</span></div>';
+  }
+  logEl.innerHTML = lh;
+}
+
+function onToggle(ev) {
+  var name = ev.currentTarget.getAttribute("data-node");
+  for (var i = 0; i < nodes.length; i++) {
+    if (nodes[i].name === name) {
+      var n = nodes[i];
+      n.failing = !n.failing;
+      // active health probe follows the failing flag
+      n.healthy = !n.failing;
+      if (!n.failing) {
+        // recovery resets outlier counter, breaker cools down naturally
+        n.outlier = 0;
+      }
+      logLine(null, "note", name + (n.failing ? " marked failing" : " marked healthy"));
+      break;
+    }
+  }
+  render();
+}
+
+// ---- Controls wiring ----
+function setStrategy(s) {
+  strategy = s;
+  var seg = document.getElementById("strategySeg");
+  var btns = seg.querySelectorAll("button");
+  for (var i = 0; i < btns.length; i++) {
+    btns[i].classList.toggle("active", btns[i].getAttribute("data-s") === s);
+  }
+  document.getElementById("keyGroup").classList.toggle("hidden", s !== "sticky");
+}
+
+document.getElementById("strategySeg").addEventListener("click", function (ev) {
+  var b = ev.target.closest("button");
+  if (!b) return;
+  setStrategy(b.getAttribute("data-s"));
+});
+
+document.getElementById("send1").addEventListener("click", function () {
+  sendRequest(currentKey());
+  render();
+});
+document.getElementById("send10").addEventListener("click", function () {
+  for (var i = 0; i < 10; i++) sendRequest(currentKey());
+  render();
+});
+document.getElementById("streamBtn").addEventListener("click", function () {
+  streaming = !streaming;
+  this.textContent = streaming ? "Stop stream" : "Start stream";
+  this.classList.toggle("primary", streaming);
+});
+document.getElementById("tickBtn").addEventListener("click", function () {
+  tick(1000);
+});
+document.getElementById("resetBtn").addEventListener("click", function () {
+  initState();
+  render();
+});
+
+// ---- Boot ----
+initState();
+setStrategy("round-robin");
+render();
+setInterval(function () { tick(TICK_MS); }, TICK_MS);
+</script>
 </body>
 </html>
