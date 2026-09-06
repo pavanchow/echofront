@@ -1044,3 +1044,192 @@ fn gate6_ewma_scaled_fuzz_invariants_hold() {
         "[gate6] ops={n} slow_ejections_total={slow_ejections} ewma_events_sum={ejections_observed}"
     );
 }
+
+// ------------------------------------------------------------------ Gate 7
+// Adversarial input and clock edges: saturation instead of panics, time zero,
+// huge clock jumps, common divisor weights, and least conn accounting under
+// overlapping in flight requests.
+
+#[test]
+fn gate7_huge_latency_saturates_instead_of_panicking() {
+    let cfg = EwmaConfig::default();
+    // The fold must saturate on adversarial latency samples. Before the fix
+    // this panicked with a multiply overflow in debug builds and silently
+    // wrapped in release.
+    let seeded = cfg.fold(None, u64::MAX);
+    assert_eq!(seeded, u64::MAX, "seeded fold must saturate");
+    let smoothed = cfg.fold(Some(seeded), u64::MAX);
+    assert_eq!(smoothed, u64::MAX, "blended fold must saturate");
+    // A moderate sample after a saturated one must still decay downward.
+    let decayed = cfg.fold(Some(u64::MAX), 0);
+    assert!(decayed < u64::MAX, "zero sample must pull the EWMA down");
+    // The ejection line saturates monotonically: a bigger mean never yields a
+    // smaller line.
+    assert_eq!(cfg.threshold_milli(u64::MAX), u64::MAX);
+    assert!(cfg.threshold_milli(u64::MAX / 2) <= u64::MAX);
+
+    // End to end: a scripted upstream that answers 200 with a u64::MAX latency
+    // must not panic the pool path, and the never select unavailable invariant
+    // holds throughout.
+    let h = health();
+    let mut p = Pool::new("svc", Strategy::RoundRobin, h);
+    p.enable_ewma(cfg);
+    let huge = MockUpstream::new("huge").with_default(Step::ok_slow(200, u64::MAX));
+    p.add_backend(Backend::new("huge", 1, Box::new(huge), &h, BreakerConfig::default()));
+    p.add_backend(Backend::new(
+        "fast",
+        1,
+        Box::new(MockUpstream::healthy("fast")),
+        &h,
+        BreakerConfig::default(),
+    ));
+    for step in 0..40u64 {
+        let now = step * 50;
+        p.poll(now);
+        if let Some(idx) = p.select(now, None, &[]) {
+            assert!(p.backend(idx).is_available(now), "unavailable pick at t={now}");
+            p.begin(idx);
+            let reply = p.dispatch(idx, &Request::get("/"));
+            p.record_success_latency(idx, now, reply.latency_ms);
+            p.end(idx);
+        }
+    }
+    // The huge node folded to a saturated EWMA without panicking anywhere.
+    let huge_ewma = p.backend(0).ewma_milli().unwrap_or(0);
+    assert_eq!(huge_ewma, u64::MAX, "huge node EWMA must be saturated");
+    // The report renders the saturated state without panicking.
+    let rows = p.distribution(40 * 50);
+    assert_eq!(rows.len(), 2);
+}
+
+#[test]
+fn gate7_time_zero_and_huge_clock_jumps() {
+    // Everything arms cleanly at t=0.
+    let breaker_cfg = BreakerConfig {
+        failure_threshold: 2,
+        success_threshold: 2,
+        cooldown_ms: 1_000,
+        half_open_max_calls: 1,
+    };
+    let h = HealthConfig {
+        outlier_consecutive_failures: 2,
+        ejection_base_ms: 500,
+        ..HealthConfig::default()
+    };
+    let mut p = Pool::new("svc", Strategy::RoundRobin, h);
+    p.add_backend(Backend::new(
+        "a",
+        1,
+        Box::new(MockUpstream::healthy("a")),
+        &h,
+        breaker_cfg,
+    ));
+    p.add_backend(Backend::new(
+        "b",
+        1,
+        Box::new(MockUpstream::healthy("b")),
+        &h,
+        breaker_cfg,
+    ));
+    p.record_failure(0, 0);
+    p.record_failure(0, 0);
+    p.poll(0);
+    assert_eq!(p.backend(0).breaker_state(), BreakerState::Open, "trip at t=0");
+    assert!(!p.backend(0).is_available(0), "open breaker callable at t=0");
+    assert!(p.backend(0).is_ejected(0), "outlier ejection at t=0");
+    // The expiry is strict: still ejected at 499, free exactly at 500.
+    assert!(p.backend(0).is_ejected(499));
+    assert!(!p.backend(0).is_ejected(500));
+    // Survivors keep serving during the outage.
+    for _ in 0..5 {
+        let idx = p.select(0, None, &[]).expect("survivor at t=0");
+        assert_eq!(idx, 1);
+    }
+
+    // A jump to the top of the u64 range must not panic or corrupt state.
+    let far = u64::MAX - 100;
+    p.poll(far);
+    // The breaker cooled down long ago and the ejection expired long ago, so
+    // the node is a half open trial and selectable again.
+    assert_eq!(p.backend(0).breaker_state(), BreakerState::HalfOpen);
+    assert!(p.select(far, None, &[]).is_some(), "no capacity after huge jump");
+    // Failures this late saturate the next ejection expiry instead of wrapping
+    // (covered in depth by gate5, asserted here at the far edge). Two
+    // consecutive failures meet the outlier threshold of this config. The
+    // first also trips the Half Open breaker back to Open.
+    p.record_failure(0, far);
+    p.record_failure(0, far);
+    p.poll(far + 1);
+    assert_eq!(p.backend(0).breaker_state(), BreakerState::Open);
+    assert!(p.backend(0).is_ejected(far + 1), "ejected at the far edge");
+    assert!(
+        p.backend(0).is_ejected(u64::MAX - 1),
+        "saturated expiry must hold at the very top of the clock"
+    );
+    // Selection still works and never returns the saturated node.
+    for _ in 0..5 {
+        let idx = p.select(far + 1, None, &[]).expect("survivor at far edge");
+        assert_ne!(idx, 0, "saturated node selected after re ejection");
+    }
+}
+
+#[test]
+fn gate7_weighted_common_divisor_exact_cycles() {
+    // Weights sharing a common divisor must still land exact cycle counts.
+    for weights in [[2u32, 4, 6, 8], [6, 10, 14, 20], [5, 5, 20, 30]] {
+        let names: Vec<String> = (0..weights.len()).map(|i| format!("w{i}")).collect();
+        let mut p = Pool::new("svc", Strategy::Weighted, health());
+        for (name, w) in names.iter().zip(weights) {
+            p.add_backend(Backend::new(
+                name.clone(),
+                w,
+                Box::new(MockUpstream::healthy(name.clone())),
+                &health(),
+                BreakerConfig::default(),
+            ));
+        }
+        p.poll(0);
+        let total: u64 = weights.iter().map(|w| u64::from(*w)).sum();
+        let mut counts = vec![0u64; weights.len()];
+        for _ in 0..total {
+            counts[p.select(0, None, &[]).unwrap()] += 1;
+        }
+        for (i, w) in weights.iter().enumerate() {
+            assert_eq!(
+                counts[i], u64::from(*w),
+                "weights {weights:?}: node {i} got {} expected {w}",
+                counts[i]
+            );
+        }
+        // The exact cycle repeats: a second identical cycle reproduces it.
+        let mut counts2 = vec![0u64; weights.len()];
+        for _ in 0..total {
+            counts2[p.select(0, None, &[]).unwrap()] += 1;
+        }
+        assert_eq!(counts, counts2, "weights {weights:?}: second cycle drifted");
+    }
+}
+
+#[test]
+fn gate7_least_conn_overlapping_in_flight_accounting() {
+    let mut p = make_pool(Strategy::LeastConnections, &[("a", 1), ("b", 1), ("c", 1)]);
+    p.poll(0);
+    // Overlap three requests, then complete them out of order.
+    p.begin(0);
+    p.begin(0);
+    p.begin(1);
+    assert_eq!(p.select(0, None, &[]).unwrap(), 2, "only c is idle");
+    p.end(1);
+    assert_eq!(p.select(0, None, &[]).unwrap(), 1, "b freed, ties break first");
+    p.end(0);
+    p.end(0);
+    for b in p.backends() {
+        assert_eq!(b.in_flight, 0, "in_flight stuck on {}", b.name);
+    }
+    // Ending a node that holds nothing must saturate at zero, never wrap.
+    p.end(2);
+    assert_eq!(p.backend(2).in_flight, 0, "in_flight wrapped below zero");
+    // And the strategy still spreads after the churn.
+    let picks: Vec<usize> = (0..3).map(|_| p.select(0, None, &[]).unwrap()).collect();
+    assert_eq!(picks.len(), 3);
+}

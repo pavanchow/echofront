@@ -45,22 +45,28 @@ impl Default for EwmaConfig {
 }
 
 impl EwmaConfig {
-    /// The ejection line for a pool mean given in milli milliseconds.
+    /// The ejection line for a pool mean given in milli milliseconds. Saturates
+    /// at `u64::MAX` instead of wrapping, so a huge mean never produces a
+    /// smaller line than a smaller mean would.
     pub fn threshold_milli(&self, pool_mean_milli: u64) -> u64 {
-        pool_mean_milli
-            .saturating_mul(self.factor_milli)
-            .saturating_div(1_000)
+        let line = u128::from(pool_mean_milli) * u128::from(self.factor_milli) / 1_000;
+        u64::try_from(line).unwrap_or(u64::MAX)
     }
 
     /// Fold one latency sample (in milliseconds) into an EWMA held in milli
     /// units. `None` means no sample yet, so the first sample seeds it whole.
+    /// The blend runs in 128 bit and saturates, so an adversarial latency near
+    /// `u64::MAX` folds to a saturated EWMA instead of panicking in debug
+    /// builds or wrapping in release.
     pub fn fold(&self, current: Option<u64>, latency_ms: u64) -> u64 {
         let sample_milli = latency_ms.saturating_mul(1_000);
         match current {
             None => sample_milli,
             Some(prev) => {
-                let alpha = self.alpha_milli.min(1_000);
-                (alpha * sample_milli + (1_000 - alpha) * prev) / 1_000
+                let alpha = u128::from(self.alpha_milli.min(1_000));
+                let blended =
+                    (alpha * u128::from(sample_milli) + (1_000 - alpha) * u128::from(prev)) / 1_000;
+                u64::try_from(blended).unwrap_or(u64::MAX)
             }
         }
     }
