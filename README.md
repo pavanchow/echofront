@@ -38,6 +38,8 @@ cargo run --release -- spread least-conn
 cargo run --release -- spread sticky
 ```
 
+The report compares each node's actual request share against its expected share of the currently available weight, and shows the EWMA of its measured latency plus its reinstatement ramp percent.
+
 ## Library API
 
 ```rust
@@ -78,18 +80,23 @@ Key types:
 - `Upstream` / `MockUpstream` / `Step`: the backend trait and its scripted mock.
 - `Strategy`: `RoundRobin`, `Weighted`, `LeastConnections`, `ConsistentHash`.
 - `Pool` / `Backend` / `HealthConfig`: the upstream pool, its members and health policy.
-- `CircuitBreaker` / `BreakerConfig` / `BreakerState`: the per upstream breaker.
+- `CircuitBreaker` / `BreakerConfig` / `BreakerState`: the per upstream breaker, including the half open trial cap `half_open_max_calls`.
+- `EwmaConfig` / `DistributionRow`: EWMA latency scoring with outlier ejection and the share report. See the design notes.
 - `RetryBudget` / `RetryConfig`: the token bucket that caps retry amplification.
 - `Router` / `Route`, `Proxy` / `HandleResult`: routing and the orchestrator.
 
+A few semantics worth knowing: a backend configured with weight 0 receives no traffic under the weighted strategy, and an all zero weight weighted pool honestly reports no capacity. A breaker in Half-Open admits at most `half_open_max_calls` concurrent trial calls (one by default), so the trial gets a clean signal.
+
 ## The correctness gate
 
-The gates are in `tests/gates.rs`. They are the load bearing proofs of the claims above and are bounded for CI. Set `ECHOFRONT_FUZZ_OPS` to change the workload size and `ECHOFRONT_FUZZ_SEED` to change the seed. The same seed produces the same timeline every run.
+The gates live in `tests/gates.rs`. They are the load bearing proofs of the claims above and are bounded for CI. Set `ECHOFRONT_FUZZ_OPS` to change the workload size and `ECHOFRONT_FUZZ_SEED` to change the seed. The same seed produces the same timeline every run.
 
 1. Load balancing correctness. Round robin visits every healthy upstream in an exact cycle, weighted distribution matches the configured weights within tolerance over many requests, and the consistent hash keeps keys on the same upstream while remapping only about `1/N` of keys when a member is added or removed.
 2. Circuit breaker state machine. A property test drives random success, failure and time sequences through the breaker and an independent reference model written to the same spec, asserting the states always agree and that an Open breaker is never callable.
 3. Health over the injected clock. A backend that starts failing its probes is ejected within the configured window and reinstated after it recovers, and the timeline is identical for the same script.
 4. Core invariant. Across a randomized workload the proxy never selects an unhealthy, ejected, or open circuit upstream, checked after every routing decision.
+5. Adversarial edges. Zero weight nodes never receive weighted traffic and an all zero weight pool reports no capacity, a continuous ejection counts exactly once and expires on schedule, ejection arithmetic saturates instead of overflowing near the top of the clock, probes land exactly one configured interval apart, Half-Open admits only the configured number of concurrent trial calls, a pool of one with an open breaker is a total outage that returns no selection, all nodes fail and recover in different orders without a bad selection, sticky keys never land on an ejected node, and granted retries never exceed the token bucket arithmetic bound.
+6. EWMA latency scoring. With latency scripts on the mock upstreams, the slowest node is ejected once its EWMA stays over the line for the sustained window, nodes within tolerance are never ejected, a reinstated node comes back at partial weight and ramps up in exact smooth weighted proportion, and the never select unavailable invariant holds throughout a scaled fuzz over forty nodes with mixed latency classes.
 
 Run everything:
 
@@ -97,6 +104,16 @@ Run everything:
 cargo test
 cargo clippy --all-targets -- -D warnings
 ```
+
+## Stress scaling
+
+`tests/stress.rs` is the max scale harness. Every scenario is env scaled with small in-CI defaults, so `cargo test` runs the whole suite with nothing ignored, while the same tests scale up to hundreds of nodes and millions of requests in release mode.
+
+```
+ECHOFRONT_STRESS_OPS=800000 ECHOFRONT_STRESS_NODES=300 cargo test --release --test stress -- --nocapture
+```
+
+Five scenarios run under one or the other env knob: mixed chaos through the proxy on a large pool with flapping nodes, breaker churn, nested retries, sticky churn and occasional huge clock jumps, a single node pool cycling between total outage and recovery, all nodes failing and recovering in scrambled order, sticky sessions riding join and leave waves, and exact weighted spread at odd weights like 1 versus 100. Every step re-checks the never select unavailable invariant, least connections accounting, breaker agreement with an independent reference model, the retry token bound and ejection accounting.
 
 ## License
 
