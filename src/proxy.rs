@@ -225,7 +225,8 @@ impl Proxy {
 
             match reply.outcome {
                 Ok(resp) => {
-                    pool.record_success(idx, now);
+                    let latency = reply.latency_ms;
+                    pool.record_success_latency(idx, now, latency);
                     attempts.push(Attempt {
                         backend: idx,
                         backend_name: name,

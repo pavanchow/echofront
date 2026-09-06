@@ -228,13 +228,17 @@ fn spread(strategy: Strategy) {
         proxy.handle(&req);
     }
     let pool = proxy.pool("shop").unwrap();
-    let total: u64 = pool.backends().iter().map(|b| b.served()).sum();
-    for b in pool.backends() {
-        let pct = 100.0 * b.served() as f64 / total as f64;
-        let bar = "#".repeat((pct / 2.0) as usize);
+    println!("  node weight served   share  expect   ramp  ewma_ms");
+    for row in pool.distribution(proxy.now()) {
+        let bar = "#".repeat((row.served_share_pct / 2.0) as usize);
+        let ewma = row
+            .ewma_milli
+            .map(|m| format!("{:>7.1}", m as f64 / 1000.0))
+            .unwrap_or_else(|| "      -".to_string());
         println!(
-            "  {:<3} weight={} served={:>5} {:>5.1}%  {}",
-            b.name, b.weight, b.served(), pct, bar
+            "  {:<3} {:>6} {:>6} {:>6.1}% {:>6.1}% {:>6.3}% {}  {}",
+            row.name, row.weight, row.served, row.served_share_pct, row.expected_share_pct,
+            row.ramp_percent, ewma, bar
         );
     }
 }

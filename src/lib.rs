@@ -12,6 +12,8 @@
 //! - [`pool`]: an upstream pool with round robin, weighted, least connections and
 //!   consistent hash strategies, active health checks, passive outlier ejection,
 //!   and a per upstream circuit breaker.
+//! - [`ewma`]: EWMA latency scoring with sustained window outlier ejection and
+//!   gradual reinstatement through partial traffic weight.
 //! - [`breaker`]: the circuit breaker state machine.
 //! - [`retry`]: a retry budget that caps retry amplification.
 //! - [`proxy`]: the orchestrator that routes, selects, sends, retries and fails
@@ -22,6 +24,7 @@
 
 pub mod breaker;
 pub mod clock;
+pub mod ewma;
 pub mod hashring;
 pub mod http;
 pub mod pool;
@@ -33,6 +36,7 @@ pub mod upstream;
 
 pub use breaker::{BreakerConfig, BreakerState, CircuitBreaker};
 pub use clock::{Clock, ManualClock, SystemClock};
+pub use ewma::{DistributionRow, EwmaConfig};
 pub use hashring::ConsistentHashRing;
 pub use http::{Method, Request, Response};
 pub use pool::{Backend, HealthConfig, Pool, Strategy};

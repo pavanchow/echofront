@@ -5,6 +5,7 @@
 
 use crate::breaker::{BreakerConfig, BreakerState, CircuitBreaker};
 use crate::clock::Clock;
+use crate::ewma::{DistributionRow, EwmaConfig};
 use crate::hashring::ConsistentHashRing;
 use crate::upstream::{Upstream, UpstreamReply};
 
@@ -82,6 +83,13 @@ pub struct Backend {
     breaker: CircuitBreaker,
     current_weight: i64,
     served: u64,
+    latency_ewma_milli: Option<u64>,
+    ewma_samples: u32,
+    over_since: Option<u64>,
+    over_since_samples: u32,
+    ewma_ejections: u64,
+    ramp_percent: u32,
+    last_ramp_step: Option<u64>,
 }
 
 impl Backend {
@@ -109,6 +117,13 @@ impl Backend {
             breaker: CircuitBreaker::new(breaker_cfg),
             current_weight: 0,
             served: 0,
+            latency_ewma_milli: None,
+            ewma_samples: 0,
+            over_since: None,
+            over_since_samples: 0,
+            ewma_ejections: 0,
+            ramp_percent: 100,
+            last_ramp_step: None,
         }
     }
 
@@ -136,6 +151,23 @@ impl Backend {
         self.ejections
     }
 
+    pub fn ewma_milli(&self) -> Option<u64> {
+        self.latency_ewma_milli
+    }
+
+    pub fn ewma_samples(&self) -> u32 {
+        self.ewma_samples
+    }
+
+    pub fn ewma_ejections(&self) -> u64 {
+        self.ewma_ejections
+    }
+
+    /// Current reinstatement ramp percent, 100 means full weight.
+    pub fn ramp_percent(&self) -> u32 {
+        self.ramp_percent
+    }
+
     /// Available means routable right now: healthy, not ejected, breaker allows
     /// the call (including the half open trial cap), and under HalfOpen a trial
     /// slot is free.
@@ -152,6 +184,7 @@ pub struct Pool {
     rr_cursor: usize,
     ring: ConsistentHashRing,
     ring_signature: Vec<usize>,
+    ewma: Option<EwmaConfig>,
 }
 
 impl Pool {
@@ -164,6 +197,7 @@ impl Pool {
             rr_cursor: 0,
             ring: ConsistentHashRing::new(160),
             ring_signature: Vec::new(),
+            ewma: None,
         }
     }
 
@@ -204,18 +238,89 @@ impl Pool {
         self.backends.is_empty()
     }
 
-    /// Promote circuit breakers on the clock and reinstate ejected outliers whose
-    /// cooldown has elapsed. Must run before any selection so state is current.
+    /// Promote circuit breakers on the clock, reinstate ejected outliers whose
+    /// cooldown has elapsed, and when the EWMA layer is enabled, evaluate
+    /// latency outliers and drive the reinstatement ramp. Must run before any
+    /// selection so state is current.
     pub fn poll(&mut self, now: u64) {
+        let ewma = self.ewma;
+        let threshold = ewma.map(|cfg| cfg.threshold_milli(self.ewma_mean()));
         for b in &mut self.backends {
             b.breaker.poll(now);
             if let Some(until) = b.ejected_until {
                 if now >= until {
                     b.ejected_until = None;
                     b.outlier_failures = 0;
+                    // A reinstated node comes back at partial weight and ramps
+                    // up only while it stays clean.
+                    if let Some(cfg) = ewma {
+                        b.ramp_percent = cfg.reinstate_percent.clamp(1, 100);
+                        b.last_ramp_step = Some(now);
+                    }
+                }
+            }
+            let Some(cfg) = ewma else { continue };
+            // Ramp up while no ejection is active.
+            if b.ejected_until.is_none() && b.ramp_percent < 100 {
+                let due = match b.last_ramp_step {
+                    None => true,
+                    Some(step) => now.saturating_sub(step) >= cfg.ramp_window_ms,
+                };
+                if due {
+                    b.ramp_percent = (b.ramp_percent.saturating_mul(2)).min(100);
+                    b.last_ramp_step = Some(now);
+                }
+            }
+            // Sustained latency outlier evaluation. Only while not already
+            // ejected, and the sustained window counts only when fresh
+            // evidence arrived, so a reinstated node is never re ejected on
+            // stale samples it cannot improve while it receives little traffic.
+            if b.ejected_until.is_none() {
+                if b.ewma_samples >= cfg.min_samples {
+                    let ewma_milli = b.latency_ewma_milli.unwrap_or(0);
+                    if ewma_milli > threshold.unwrap_or(0) {
+                        match b.over_since {
+                            None => {
+                                b.over_since = Some(now);
+                                b.over_since_samples = b.ewma_samples;
+                            }
+                            Some(since) => {
+                                let fresh =
+                                    b.ewma_samples.saturating_sub(b.over_since_samples);
+                                if now.saturating_sub(since) >= cfg.window_ms
+                                    && fresh >= cfg.min_samples
+                                {
+                                    b.ejected_until =
+                                        Some(now.saturating_add(cfg.ejection_ms));
+                                    b.ewma_ejections += 1;
+                                    b.over_since = None;
+                                }
+                            }
+                        }
+                    } else {
+                        b.over_since = None;
+                    }
+                } else {
+                    b.over_since = None;
                 }
             }
         }
+    }
+
+    /// Mean EWMA over nodes with enough samples, in milli milliseconds.
+    fn ewma_mean(&self) -> u64 {
+        let Some(cfg) = self.ewma else { return 0 };
+        let mut sum: u128 = 0;
+        let mut n: u128 = 0;
+        for b in &self.backends {
+            if b.ewma_samples >= cfg.min_samples {
+                sum += u128::from(b.latency_ewma_milli.unwrap_or(0));
+                n += 1;
+            }
+        }
+        // When no node qualifies the sum is zero too, so the max keeps the
+        // division safe and the mean at zero.
+        (sum / n.max(1)) as u64
     }
 
     fn available_indices(&self, now: u64, exclude: &[usize]) -> Vec<usize> {
@@ -250,16 +355,19 @@ impl Pool {
 
     fn select_weighted(&mut self, available: &[usize]) -> Option<usize> {
         // Zero weight nodes receive no traffic. If every available node has
-        // weight zero the pool has no capacity under this strategy.
+        // weight zero the pool has no capacity under this strategy. Nodes on a
+        // reinstatement ramp carry a fraction of their weight, which the
+        // smooth WRR arithmetic reproduces exactly.
         let mut best: Option<usize> = None;
         let mut total: i64 = 0;
         for &i in available {
             if self.backends[i].weight == 0 {
                 continue;
             }
-            total += self.backends[i].weight as i64;
+            let score = self.weighted_score(i);
+            total += score;
             let w = &mut self.backends[i];
-            w.current_weight += w.weight as i64;
+            w.current_weight += score;
             match best {
                 None => best = Some(i),
                 Some(b) => {
@@ -273,6 +381,14 @@ impl Pool {
             self.backends[b].current_weight -= total;
         }
         best
+    }
+
+    /// Effective weight of a node for the weighted strategy: configured weight
+    /// scaled by the reinstatement ramp percent. With no EWMA layer the ramp is
+    /// always 100, so this is exactly the configured weight.
+    fn weighted_score(&self, i: usize) -> i64 {
+        let b = &self.backends[i];
+        b.weight as i64 * i64::from(b.ramp_percent)
     }
 
     fn select_least_conn(&self, available: &[usize]) -> usize {
@@ -322,6 +438,60 @@ impl Pool {
         b.served += 1;
         b.outlier_failures = 0;
         b.breaker.on_success(now);
+    }
+
+    /// Like `record_success` and additionally fold the request latency into the
+    /// node's EWMA when the EWMA layer is enabled. Callers without a latency
+    /// measurement can keep using `record_success`, which never touches the
+    /// EWMA so it cannot skew the pool mean.
+    pub fn record_success_latency(&mut self, idx: usize, now: u64, latency_ms: u64) {
+        self.record_success(idx, now);
+        let Some(cfg) = self.ewma else { return };
+        let b = &mut self.backends[idx];
+        b.latency_ewma_milli = Some(cfg.fold(b.latency_ewma_milli, latency_ms));
+        b.ewma_samples += 1;
+    }
+
+    /// Attach the EWMA latency outlier layer to this pool.
+    pub fn enable_ewma(&mut self, cfg: EwmaConfig) {
+        self.ewma = Some(cfg);
+    }
+
+    pub fn ewma_config(&self) -> Option<EwmaConfig> {
+        self.ewma
+    }
+
+    /// Distribution report: what each node actually received versus its share
+    /// of the currently available effective weight, plus EWMA and ramp state.
+    pub fn distribution(&self, now: u64) -> Vec<DistributionRow> {
+        let total_served: u64 = self.backends.iter().map(|b| b.served).sum();
+        let available = self.available_indices(now, &[]);
+        let total_score: i64 = available.iter().map(|&i| self.weighted_score(i)).sum();
+        (0..self.backends.len())
+            .map(|i| {
+                let b = &self.backends[i];
+                let expected_share_pct = if total_score > 0 && available.contains(&i) {
+                    100.0 * self.weighted_score(i) as f64 / total_score as f64
+                } else {
+                    0.0
+                };
+                DistributionRow {
+                    name: b.name.clone(),
+                    served: b.served,
+                    served_share_pct: if total_served > 0 {
+                        100.0 * b.served as f64 / total_served as f64
+                    } else {
+                        0.0
+                    },
+                    expected_share_pct,
+                    weight: b.weight,
+                    ewma_milli: b.latency_ewma_milli,
+                    ejected: !b.is_available(now),
+                    ramp_percent: b.ramp_percent,
+                    ewma_ejections: b.ewma_ejections,
+                }
+            })
+            .collect()
     }
 
     /// Feed a failed outcome back in. May trip the breaker or eject the backend

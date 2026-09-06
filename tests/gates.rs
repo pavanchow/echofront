@@ -11,6 +11,7 @@
 
 use echofront::breaker::{BreakerConfig, BreakerState, CircuitBreaker};
 use echofront::clock::ManualClock;
+use echofront::ewma::EwmaConfig;
 use echofront::hashring::ConsistentHashRing;
 use echofront::http::Request;
 use echofront::pool::{Backend, HealthConfig, Pool, Strategy};
@@ -734,4 +735,304 @@ fn gate5_retry_budget_bounds_amplification() {
         "retries {retries_seen} exceeded token arithmetic bound {bound}"
     );
     assert!(retries_seen > 0, "budget never allowed a single retry");
+}
+
+// ------------------------------------------------------------------ Gate 6
+// EWMA latency scoring: outlier ejection, gradual reinstatement, and the
+// distribution report.
+
+fn ewma_cfg() -> EwmaConfig {
+    EwmaConfig {
+        alpha_milli: 500,
+        factor_milli: 3_000,
+        window_ms: 1_000,
+        min_samples: 4,
+        ejection_ms: 2_000,
+        reinstate_percent: 25,
+        ramp_window_ms: 1_000,
+    }
+}
+
+/// Drive one weighted request at `now` and return (idx, latency). Asserts the
+/// never select unavailable invariant on every call.
+fn ewma_drive(p: &mut Pool, now: u64) -> (usize, u64) {
+    p.poll(now);
+    let idx = p.select(now, None, &[]).expect("pool must have capacity");
+    let b = p.backend(idx);
+    assert!(b.is_available(now), "selected unavailable backend at t={now}");
+    p.begin(idx);
+    let reply = p.dispatch(idx, &Request::get("/"));
+    let latency = reply.latency_ms;
+    assert!(reply.outcome.is_ok(), "scripted latency node must answer ok");
+    p.record_success_latency(idx, now, latency);
+    p.end(idx);
+    (idx, latency)
+}
+
+#[test]
+fn gate6_ewma_ejects_worst_node_and_reinstates_gradually() {
+    let cfg = ewma_cfg();
+    let h = HealthConfig::default();
+    let mut p = Pool::new("svc", Strategy::Weighted, h);
+    p.enable_ewma(cfg);
+    for n in ["f0", "f1", "f2"] {
+        p.add_backend(Backend::new(
+            n,
+            1,
+            Box::new(MockUpstream::healthy(n)),
+            &h,
+            BreakerConfig::default(),
+        ));
+    }
+    // The slow node stays slow for 30 samples then becomes fast.
+    let slow = MockUpstream::new("slow");
+    for _ in 0..10 {
+        slow.push(Step::ok_slow(200, 100));
+    }
+    p.add_backend(Backend::new(
+        "slow",
+        1,
+        Box::new(slow),
+        &h,
+        BreakerConfig::default(),
+    ));
+    let slow_idx = 3;
+
+    let mut saw_ejection = false;
+    for step in 0..120u64 {
+        let now = step * 100;
+        p.poll(now);
+        if p.backend(slow_idx).is_ejected(now) {
+            saw_ejection = true;
+            if let Some(idx) = p.select(now, None, &[]) {
+                assert_ne!(
+                    idx, slow_idx,
+                    "EWMA ejected node was selected at t={now}"
+                );
+            }
+            continue;
+        }
+        ewma_drive(&mut p, now);
+    }
+    assert!(saw_ejection, "the slow node was never ejected");
+    // It recovered: exactly one ejection, ramp back to full, serving again.
+    assert_eq!(p.backend(slow_idx).ewma_ejections(), 1);
+    assert_eq!(p.backend(slow_idx).ramp_percent(), 100);
+    let final_now = 120 * 100;
+    let idx = p.select(final_now, None, &[]).expect("capacity");
+    assert!(p.backend(idx).is_available(final_now));
+}
+
+#[test]
+fn gate6_ewma_no_ejection_within_tolerance() {
+    let cfg = ewma_cfg();
+    let h = HealthConfig::default();
+
+    // Identical latencies: nobody is an outlier.
+    let mut p = Pool::new("svc", Strategy::Weighted, h);
+    p.enable_ewma(cfg);
+    for n in ["a", "b", "c", "d"] {
+        p.add_backend(Backend::new(
+            n,
+            1,
+            Box::new(MockUpstream::healthy(n)),
+            &h,
+            BreakerConfig::default(),
+        ));
+    }
+    for step in 0..120u64 {
+        let now: u64 = step * 100;
+        ewma_drive(&mut p, now);
+    }
+    for b in p.backends() {
+        assert_eq!(b.ewma_ejections(), 0, "node {} ejected without cause", b.name);
+    }
+
+    // Moderate spread stays under the 3x line: 10 vs a 5.25 mean is 1.9x.
+    let mut p2 = Pool::new("svc2", Strategy::Weighted, h);
+    p2.enable_ewma(cfg);
+    for (i, latency) in [5u64, 5, 6, 10].into_iter().enumerate() {
+        let up = MockUpstream::new(format!("n{i}")).with_default(Step::ok_slow(200, latency));
+        p2.add_backend(Backend::new(
+            format!("n{i}"),
+            1,
+            Box::new(up),
+            &h,
+            BreakerConfig::default(),
+        ));
+    }
+    for step in 0..120u64 {
+        let now2: u64 = step * 100;
+        ewma_drive(&mut p2, now2);
+    }
+    for b in p2.backends() {
+        assert_eq!(b.ewma_ejections(), 0, "node {} ejected within tolerance", b.name);
+    }
+}
+
+#[test]
+fn gate6_ewma_reinstates_with_partial_weight() {
+    let cfg = ewma_cfg();
+    let h = HealthConfig::default();
+    let mut p = Pool::new("svc", Strategy::Weighted, h);
+    p.enable_ewma(cfg);
+    for n in ["f0", "f1", "f2"] {
+        p.add_backend(Backend::new(
+            n,
+            1,
+            Box::new(MockUpstream::healthy(n)),
+            &h,
+            BreakerConfig::default(),
+        ));
+    }
+    // Slow node: slow for 30 samples then permanently fast.
+    let slow = MockUpstream::new("slow");
+    for _ in 0..30 {
+        slow.push(Step::ok_slow(200, 100));
+    }
+    p.add_backend(Backend::new(
+        "slow",
+        1,
+        Box::new(slow),
+        &h,
+        BreakerConfig::default(),
+    ));
+    let slow_idx = 3;
+
+    let mut reinstated_at = None;
+    for step in 0..60u64 {
+        let now = step * 100;
+        p.poll(now);
+        if p.backend(slow_idx).ewma_ejections() >= 1 && !p.backend(slow_idx).is_ejected(now) {
+            reinstated_at = Some(now);
+            break;
+        }
+        ewma_drive(&mut p, now);
+    }
+    let t0 = reinstated_at.expect("node must be ejected and reinstated");
+    assert_eq!(p.backend(slow_idx).ramp_percent(), 25, "reinstatement starts at 25 percent");
+
+    // While ramped down the node earns a fraction of its weight: scores are
+    // 25, 100, 100, 100, so its share is about 7.7 percent, not 25.
+    let mut counts = [0u64; 4];
+    let picks = 9_750u64; // 30 full cycles of the smooth WRR period
+    for _ in 0..picks {
+        p.poll(t0);
+        let idx = p.select(t0, None, &[]).expect("capacity");
+        assert!(p.backend(idx).is_available(t0));
+        counts[idx] += 1;
+    }
+    let slow_share = counts[slow_idx] as f64 / picks as f64;
+    let expected = 25.0 / 325.0;
+    assert!(
+        (slow_share - expected).abs() < 0.01,
+        "ramped share {slow_share:.4} not near {expected:.4}"
+    );
+    assert!(slow_share < 0.20, "ramped node received near full traffic");
+    assert_eq!(p.backend(slow_idx).ramp_percent(), 25, "frozen clock must hold the ramp");
+
+    // Two clean ramp windows later the node is back at full weight and its
+    // share matches the others.
+    p.poll(t0 + 1_000);
+    assert_eq!(p.backend(slow_idx).ramp_percent(), 50);
+    let t1 = t0 + 2_000;
+    p.poll(t1);
+    assert_eq!(p.backend(slow_idx).ramp_percent(), 100);
+    let mut counts2 = [0u64; 4];
+    for _ in 0..4_000u64 {
+        p.poll(t1);
+        let idx = p.select(t1, None, &[]).expect("capacity");
+        assert!(p.backend(idx).is_available(t1));
+        counts2[idx] += 1;
+    }
+    for (i, c) in counts2.iter().enumerate() {
+        let share = *c as f64 / 4_000.0;
+        assert!(
+            (share - 0.25).abs() < 0.01,
+            "node {i} share {share:.4} not near 0.25 after full ramp"
+        );
+    }
+    // The distribution report agrees with the picks.
+    let rows = p.distribution(t1);
+    assert_eq!(rows.len(), 4);
+    for row in &rows {
+        assert!(!row.ejected);
+        assert!((row.expected_share_pct - 25.0).abs() < 0.01);
+    }
+}
+
+#[test]
+fn gate6_ewma_scaled_fuzz_invariants_hold() {
+    let mut rng = Rng::new(seed() ^ 0x0E77_A000);
+    let n = ops().max(3_000);
+    let cfg = EwmaConfig {
+        alpha_milli: 500,
+        factor_milli: 3_000,
+        window_ms: 500,
+        min_samples: 4,
+        ejection_ms: 700,
+        reinstate_percent: 25,
+        ramp_window_ms: 500,
+    };
+    let h = HealthConfig::default();
+    let mut p = Pool::new("svc", Strategy::Weighted, h);
+    p.enable_ewma(cfg);
+    let mut slow_class = [false; 40];
+    slow_class.iter_mut().enumerate().for_each(|(i, is_slow)| {
+        // Every fourth node is slow (50 ms), the rest fast (5 ms).
+        *is_slow = i % 4 == 3;
+        let latency = if *is_slow { 50 } else { 5 };
+        let up = MockUpstream::new(format!("n{i}")).with_default(Step::ok_slow(200, latency));
+        p.add_backend(Backend::new(
+            format!("n{i}"),
+            1,
+            Box::new(up),
+            &h,
+            BreakerConfig::default(),
+        ));
+    });
+
+    let mut now: u64 = 0;
+    let mut ejections_observed = 0u64;
+    for _ in 0..n {
+        now += rng.below(120);
+        p.poll(now);
+        let ejected_before: Vec<bool> =
+            p.backends().iter().map(|b| b.is_ejected(now)).collect();
+        if let Some(idx) = p.select(now, None, &[]) {
+            assert!(
+                p.backend(idx).is_available(now),
+                "selected unavailable node {idx} at t={now}"
+            );
+            p.begin(idx);
+            let reply = p.dispatch(idx, &Request::get("/"));
+            p.record_success_latency(idx, now, reply.latency_ms);
+            p.end(idx);
+            assert!(!ejected_before[idx], "ejected node was selected at t={now}");
+        }
+        ejections_observed += p
+            .backends()
+            .iter()
+            .map(|b| b.ewma_ejections())
+            .sum::<u64>();
+        let _ = &ejected_before;
+    }
+    // Slow nodes got ejected, fast nodes never did.
+    let mut slow_ejections = 0u64;
+    for (i, b) in p.backends().iter().enumerate() {
+        if slow_class[i] {
+            slow_ejections += b.ewma_ejections();
+        } else {
+            assert_eq!(
+                b.ewma_ejections(),
+                0,
+                "fast node {} was ejected as a latency outlier",
+                b.name
+            );
+        }
+    }
+    assert!(slow_ejections > 0, "no slow node was ever ejected");
+    println!(
+        "[gate6] ops={n} slow_ejections_total={slow_ejections} ewma_events_sum={ejections_observed}"
+    );
 }
