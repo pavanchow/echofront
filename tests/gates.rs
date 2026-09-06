@@ -1064,9 +1064,13 @@ fn gate7_huge_latency_saturates_instead_of_panicking() {
     let decayed = cfg.fold(Some(u64::MAX), 0);
     assert!(decayed < u64::MAX, "zero sample must pull the EWMA down");
     // The ejection line saturates monotonically: a bigger mean never yields a
-    // smaller line.
+    // smaller line, and 3x half the clock range saturates at the top.
     assert_eq!(cfg.threshold_milli(u64::MAX), u64::MAX);
-    assert!(cfg.threshold_milli(u64::MAX / 2) <= u64::MAX);
+    assert_eq!(cfg.threshold_milli(u64::MAX / 2), u64::MAX);
+    assert!(
+        cfg.threshold_milli(1_000) < cfg.threshold_milli(u64::MAX / 2),
+        "the line must grow with the mean"
+    );
 
     // End to end: a scripted upstream that answers 200 with a u64::MAX latency
     // must not panic the pool path, and the never select unavailable invariant
