@@ -10,10 +10,15 @@
 //! Gate 4: the proxy never selects an unhealthy, ejected, or open circuit upstream.
 
 use echofront::breaker::{BreakerConfig, BreakerState, CircuitBreaker};
+use echofront::clock::ManualClock;
 use echofront::hashring::ConsistentHashRing;
+use echofront::http::Request;
 use echofront::pool::{Backend, HealthConfig, Pool, Strategy};
+use echofront::proxy::Proxy;
+use echofront::retry::RetryConfig;
 use echofront::rng::Rng;
-use echofront::upstream::MockUpstream;
+use echofront::router::{Route, Router};
+use echofront::upstream::{MockUpstream, Step, UpstreamError};
 
 fn ops() -> usize {
     std::env::var("ECHOFRONT_FUZZ_OPS")
@@ -205,6 +210,7 @@ fn gate2_breaker_matches_reference_model() {
         failure_threshold: 3,
         success_threshold: 2,
         cooldown_ms: 1000,
+        half_open_max_calls: 1,
     };
     let mut real = CircuitBreaker::new(cfg);
     let mut refm = RefBreaker::new(cfg);
@@ -357,4 +363,375 @@ fn gate4_never_selects_unavailable_upstream() {
         }
     }
     assert!(selections > 0, "workload made no selections");
+}
+
+// ------------------------------------------------------------------ Gate 5
+// Adversarial edge cases added during hardening.
+
+#[test]
+fn gate5_zero_weight_never_selected() {
+    let mut p = make_pool(Strategy::Weighted, &[("a", 0), ("b", 3)]);
+    p.poll(0);
+    for i in 0..300 {
+        assert_eq!(
+            p.select(0, None, &[]).unwrap(),
+            1,
+            "zero weight node got traffic on pick {i}"
+        );
+    }
+    // A weighted pool whose available nodes all have weight zero has no
+    // capacity, so selection fails honestly instead of ignoring the weight.
+    let mut p0 = make_pool(Strategy::Weighted, &[("a", 0), ("b", 0)]);
+    p0.poll(0);
+    assert!(p0.select(0, None, &[]).is_none(), "all zero weight pool selected someone");
+    // Zero weight only affects the weighted strategy: other strategies still
+    // consider the node routable, which keeps the strategies orthogonal.
+    let mut p1 = make_pool(Strategy::RoundRobin, &[("a", 0), ("b", 1)]);
+    p1.poll(0);
+    assert!(p1.select(0, None, &[]).is_some());
+}
+
+#[test]
+fn gate5_continuous_ejection_counts_once() {
+    let h = HealthConfig {
+        outlier_consecutive_failures: 3,
+        ejection_base_ms: 500,
+        ..HealthConfig::default()
+    };
+    let mut p = Pool::new("svc", Strategy::RoundRobin, h);
+    for n in ["a", "b"] {
+        p.add_backend(Backend::new(
+            n,
+            1,
+            Box::new(MockUpstream::healthy(n)),
+            &h,
+            BreakerConfig::default(),
+        ));
+    }
+    // First failure run arms the ejection.
+    for t in 0..3u64 {
+        p.record_failure(0, 100 + t);
+    }
+    p.poll(102);
+    assert!(p.backend(0).is_ejected(102));
+    assert_eq!(p.backend(0).ejections(), 1);
+    // In flight failures landing while already ejected must not re count or
+    // extend the same ejection.
+    p.record_failure(0, 103);
+    p.record_failure(0, 104);
+    p.record_failure(0, 105);
+    assert_eq!(p.backend(0).ejections(), 1, "one continuous ejection counted twice");
+    assert!(
+        p.backend(0).is_ejected(599),
+        "cooldown was extended past the armed expiry"
+    );
+    assert!(!p.backend(0).is_ejected(602), "cooldown must expire on schedule");
+    p.poll(700);
+    assert_eq!(p.backend(0).ejections(), 1, "counter moved without a fresh run");
+}
+
+#[test]
+fn gate5_ejection_time_never_overflows() {
+    let h = HealthConfig {
+        outlier_consecutive_failures: 1,
+        ejection_base_ms: 5_000,
+        ..HealthConfig::default()
+    };
+    let mut p = Pool::new("svc", Strategy::RoundRobin, h);
+    p.add_backend(Backend::new(
+        "a",
+        1,
+        Box::new(MockUpstream::healthy("a")),
+        &h,
+        BreakerConfig::default(),
+    ));
+    let now = u64::MAX - 10;
+    p.record_failure(0, now);
+    assert!(p.backend(0).is_ejected(now));
+    // Saturated expiry: the backend stays ejected essentially forever.
+    assert!(p.backend(0).is_ejected(u64::MAX - 1));
+}
+
+#[test]
+fn gate5_probe_cadence_matches_interval() {
+    let h = HealthConfig {
+        probe_interval_ms: 1_000,
+        unhealthy_probe_threshold: 2,
+        healthy_probe_threshold: 2,
+        ..HealthConfig::default()
+    };
+    let mut p = Pool::new("svc", Strategy::RoundRobin, h);
+    let up = MockUpstream::new("a");
+    up.push_probes([false, false]);
+    p.add_backend(Backend::new("a", 1, Box::new(up), &h, BreakerConfig::default()));
+    // Probes land exactly one interval apart: two failures flip the backend at
+    // the second probe, not one interval later.
+    p.run_health_checks(0);
+    assert!(p.backend(0).is_healthy());
+    p.run_health_checks(1000);
+    assert!(
+        !p.backend(0).is_healthy(),
+        "two failed probes one interval apart must eject by t=1000"
+    );
+    // Default probe is true after the script runs out: two good probes
+    // reinstate, again one interval apart.
+    p.run_health_checks(2000);
+    assert!(!p.backend(0).is_healthy());
+    p.run_health_checks(3000);
+    p.run_health_checks(4000);
+    assert!(p.backend(0).is_healthy(), "two good probes must reinstate");
+}
+
+#[test]
+fn gate5_half_open_admits_limited_concurrent_calls() {
+    let breaker_cfg = BreakerConfig {
+        failure_threshold: 1,
+        success_threshold: 1,
+        cooldown_ms: 100,
+        half_open_max_calls: 1,
+    };
+    let h = HealthConfig::default();
+    let mut p = Pool::new("svc", Strategy::RoundRobin, h);
+    p.add_backend(Backend::new(
+        "a",
+        1,
+        Box::new(MockUpstream::healthy("a")),
+        &h,
+        breaker_cfg,
+    ));
+    // Trip it, then let the cooldown elapse into half open.
+    p.record_failure(0, 0);
+    p.poll(100);
+    assert_eq!(p.backend(0).breaker_state(), BreakerState::HalfOpen);
+    // The trial slot is free: one call may enter.
+    let idx = p.select(100, None, &[]).expect("half open admits a trial");
+    assert_eq!(idx, 0);
+    p.begin(0);
+    // With the trial slot held, nothing else may be selected.
+    assert!(
+        p.select(100, None, &[]).is_none(),
+        "half open admitted a second concurrent call"
+    );
+    p.end(0);
+    // Slot released: callable again.
+    assert!(p.select(100, None, &[]).is_some());
+    // A success closes the breaker and the cap stops applying.
+    p.record_success(0, 100);
+    assert_eq!(p.backend(0).breaker_state(), BreakerState::Closed);
+    p.begin(0);
+    assert!(p.select(100, None, &[]).is_some());
+    p.end(0);
+}
+
+#[test]
+fn gate5_single_node_breaker_open_is_total_outage() {
+    let h = HealthConfig::default();
+    let mut p = Pool::new("svc", Strategy::RoundRobin, h);
+    p.add_backend(Backend::new(
+        "a",
+        1,
+        Box::new(MockUpstream::healthy("a")),
+        &h,
+        BreakerConfig::default(),
+    ));
+    // Trip the only node: selection must fail honestly, not fall through.
+    let threshold = u64::from(BreakerConfig::default().failure_threshold);
+    for t in 0..threshold {
+        p.record_failure(0, t);
+    }
+    let opened_at = threshold - 1;
+    p.poll(opened_at);
+    assert_eq!(p.backend(0).breaker_state(), BreakerState::Open);
+    for i in 0..10 {
+        assert!(
+            p.select(opened_at, None, &[]).is_none(),
+            "pool of one must return None while its breaker is open (probe {i})"
+        );
+    }
+    // After the cooldown the node is a half open trial and selectable again.
+    let half_open_at = opened_at + BreakerConfig::default().cooldown_ms;
+    p.poll(half_open_at);
+    assert!(p.select(half_open_at, None, &[]).is_some());
+    p.record_success(0, half_open_at + 1);
+    assert_eq!(p.backend(0).breaker_state(), BreakerState::HalfOpen);
+}
+
+#[test]
+fn gate5_all_nodes_fail_then_recover_in_different_orders() {
+    let h = HealthConfig {
+        probe_interval_ms: 1_000,
+        unhealthy_probe_threshold: 2,
+        healthy_probe_threshold: 2,
+        outlier_consecutive_failures: 5,
+        ejection_base_ms: 1_500,
+        start_healthy: true,
+    };
+    let breaker_cfg = BreakerConfig {
+        failure_threshold: 5,
+        success_threshold: 2,
+        cooldown_ms: 900,
+        half_open_max_calls: 1,
+    };
+    let mut p = Pool::new("svc", Strategy::RoundRobin, h);
+    // Each node fails a different number of times, so they recover in a
+    // different order than they failed.
+    for (i, n) in ["a", "b", "c", "d"].iter().enumerate() {
+        let up = MockUpstream::new(*n);
+        for _ in 0..((i + 1) * 3) {
+            up.push(Step::fail(UpstreamError::Connection));
+        }
+        p.add_backend(Backend::new(*n, 1, Box::new(up), &h, breaker_cfg));
+    }
+
+    let mut now: u64 = 0;
+    let mut ever_unavailable_pick = false;
+    // Failure phase with failover within each request.
+    for r in 0..40u64 {
+        now += 120;
+        p.poll(now);
+        let mut tried: Vec<usize> = Vec::new();
+        while let Some(idx) = p.select(now, None, &tried) {
+            assert!(
+                p.backend(idx).is_available(now),
+                "selected unavailable backend at t={now}"
+            );
+            p.begin(idx);
+            let reply = p.dispatch(idx, &Request::get("/"));
+            let ok = reply.outcome.is_ok();
+            if ok {
+                p.record_success(idx, now);
+            } else {
+                p.record_failure(idx, now);
+            }
+            p.end(idx);
+            if ok || tried.len() >= p.len() {
+                break;
+            }
+            tried.push(idx);
+            ever_unavailable_pick = true;
+        }
+        let _ = r;
+    }
+    assert!(ever_unavailable_pick, "script never exercised failover");
+    // Recovery phase: leftover scripted failures drain first, then everything
+    // succeeds and every node ends available.
+    for r in 0..30u64 {
+        now += 1_100;
+        p.poll(now);
+        let idx = p.select(now, None, &[]).expect("pool must have capacity");
+        p.begin(idx);
+        let reply = p.dispatch(idx, &Request::get("/"));
+        if r >= 15 {
+            assert!(
+                reply.outcome.is_ok(),
+                "request {r} failed during late recovery at t={now}"
+            );
+        }
+        match reply.outcome {
+            Ok(_) => p.record_success(idx, now),
+            Err(_) => p.record_failure(idx, now),
+        }
+        p.end(idx);
+    }
+    p.poll(now + 10_000);
+    for b in p.backends() {
+        assert!(
+            b.is_available(now + 10_000),
+            "backend {} did not recover: healthy={} breaker={:?}",
+            b.name,
+            b.is_healthy(),
+            b.breaker_state()
+        );
+    }
+}
+
+#[test]
+fn gate5_sticky_key_never_lands_on_ejected_node() {
+    let h = HealthConfig {
+        outlier_consecutive_failures: 2,
+        ejection_base_ms: 30_000,
+        ..HealthConfig::default()
+    };
+    let mut p = Pool::new("svc", Strategy::ConsistentHash, h);
+    for n in ["a", "b", "c", "d"] {
+        p.add_backend(Backend::new(
+            n,
+            1,
+            Box::new(MockUpstream::healthy(n)),
+            &h,
+            BreakerConfig::default(),
+        ));
+    }
+    p.poll(0);
+    // Eject node a. Sticky keys that hashed to it must move to a survivor.
+    p.record_failure(0, 10);
+    p.record_failure(0, 11);
+    p.poll(11);
+    assert!(p.backend(0).is_ejected(11));
+    for i in 0..500 {
+        let key = format!("session-{i}");
+        let idx = p.select(11, Some(&key), &[]).expect("survivors available");
+        let b = p.backend(idx);
+        assert!(
+            b.is_available(11),
+            "sticky key {key} landed on unavailable node {} (probe {i})",
+            b.name
+        );
+    }
+    // Reinstatement: keys may return home, and always to an available node.
+    p.poll(30_011);
+    for i in 0..500 {
+        let key = format!("session-{i}");
+        let idx = p.select(30_011, Some(&key), &[]).expect("all nodes back");
+        assert!(p.backend(idx).is_available(30_011));
+    }
+}
+
+#[test]
+fn gate5_retry_budget_bounds_amplification() {
+    let clock = std::rc::Rc::new(ManualClock::new(0));
+    let retry_cfg = RetryConfig::default();
+    let h = HealthConfig::default();
+    let mut pool = Pool::new("svc", Strategy::RoundRobin, h);
+    pool.add_backend(Backend::new(
+        "bad-a",
+        1,
+        Box::new(MockUpstream::always_failing("bad-a", UpstreamError::Connection)),
+        &h,
+        BreakerConfig::default(),
+    ));
+    pool.add_backend(Backend::new(
+        "bad-b",
+        1,
+        Box::new(MockUpstream::always_failing("bad-b", UpstreamError::Connection)),
+        &h,
+        BreakerConfig::default(),
+    ));
+    let mut router = Router::new();
+    router.add(Route::new(None, "/", "svc"));
+    let mut proxy = Proxy::new(clock.clone(), router, retry_cfg);
+    proxy.add_pool(pool);
+
+    let n = 500u64;
+    let mut retries_seen = 0u64;
+    for r in 0..n {
+        let res = proxy.handle(&Request::get("/").with_header("Host", "h"));
+        assert!(res.response.is_err(), "request {r} unexpectedly succeeded");
+        let attempts = res.attempts.len() as u32;
+        assert!(
+            attempts <= retry_cfg.max_retries_per_request + 1,
+            "request {r} made {attempts} attempts, above the configured maximum"
+        );
+        retries_seen += res.attempts.iter().filter(|a| a.is_retry).count() as u64;
+    }
+    // Token arithmetic: the bucket starts at max_milli and each request
+    // deposits deposit_milli, so total granted retries can never exceed
+    // (max_milli + n * deposit) / cost.
+    let bound = (retry_cfg.max_milli + n as i64 * retry_cfg.deposit_milli)
+        / retry_cfg.retry_cost_milli;
+    assert!(
+        (retries_seen as i64) <= bound,
+        "retries {retries_seen} exceeded token arithmetic bound {bound}"
+    );
+    assert!(retries_seen > 0, "budget never allowed a single retry");
 }

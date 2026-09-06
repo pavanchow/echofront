@@ -22,6 +22,9 @@ pub struct BreakerConfig {
     pub success_threshold: u32,
     /// How long Open lasts before moving to HalfOpen.
     pub cooldown_ms: u64,
+    /// How many calls may be in flight concurrently while HalfOpen. One is the
+    /// classic canary trial. Zero is treated as one.
+    pub half_open_max_calls: u32,
 }
 
 impl Default for BreakerConfig {
@@ -30,6 +33,7 @@ impl Default for BreakerConfig {
             failure_threshold: 5,
             success_threshold: 2,
             cooldown_ms: 5_000,
+            half_open_max_calls: 1,
         }
     }
 }
@@ -87,6 +91,19 @@ impl CircuitBreaker {
         }
     }
 
+    /// Whether one more call may enter given how many are already in flight on
+    /// this upstream. While HalfOpen, concurrent trial calls are capped at
+    /// half_open_max_calls so the trial gets a clean signal.
+    pub fn admits(&self, now: u64, in_flight: u32) -> bool {
+        if !self.is_callable(now) {
+            return false;
+        }
+        match self.state {
+            BreakerState::HalfOpen => in_flight < self.cfg.half_open_max_calls.max(1),
+            _ => true,
+        }
+    }
+
     pub fn on_success(&mut self, now: u64) {
         self.poll(now);
         match self.state {
@@ -139,6 +156,7 @@ mod tests {
             failure_threshold: 3,
             success_threshold: 2,
             cooldown_ms: 1000,
+            half_open_max_calls: 1,
         }
     }
 

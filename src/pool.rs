@@ -75,7 +75,7 @@ pub struct Backend {
     healthy: bool,
     probe_failures: u32,
     probe_successes: u32,
-    last_probe: u64,
+    last_probe: Option<u64>,
     outlier_failures: u32,
     ejected_until: Option<u64>,
     ejections: u64,
@@ -94,13 +94,15 @@ impl Backend {
     ) -> Self {
         Self {
             name: name.into(),
-            weight: weight.max(1),
+            // Weight zero is meaningful: the node gets no traffic under the
+            // weighted strategy. Other strategies ignore weight.
+            weight,
             upstream,
             in_flight: 0,
             healthy: health.start_healthy,
             probe_failures: 0,
             probe_successes: 0,
-            last_probe: 0,
+            last_probe: None,
             outlier_failures: 0,
             ejected_until: None,
             ejections: 0,
@@ -118,6 +120,10 @@ impl Backend {
         matches!(self.ejected_until, Some(until) if now < until)
     }
 
+    pub fn ejected_until(&self) -> Option<u64> {
+        self.ejected_until
+    }
+
     pub fn breaker_state(&self) -> BreakerState {
         self.breaker.state()
     }
@@ -130,9 +136,11 @@ impl Backend {
         self.ejections
     }
 
-    /// Available means routable right now: healthy, not ejected, breaker allows.
+    /// Available means routable right now: healthy, not ejected, breaker allows
+    /// the call (including the half open trial cap), and under HalfOpen a trial
+    /// slot is free.
     pub fn is_available(&self, now: u64) -> bool {
-        self.healthy && !self.is_ejected(now) && self.breaker.is_callable(now)
+        self.healthy && !self.is_ejected(now) && self.breaker.admits(now, self.in_flight)
     }
 }
 
@@ -226,7 +234,7 @@ impl Pool {
         }
         let chosen = match self.strategy {
             Strategy::RoundRobin => self.select_round_robin(&available),
-            Strategy::Weighted => self.select_weighted(&available),
+            Strategy::Weighted => self.select_weighted(&available)?,
             Strategy::LeastConnections => self.select_least_conn(&available),
             Strategy::ConsistentHash => self.select_hash(&available, key),
         };
@@ -240,16 +248,30 @@ impl Pool {
         pick
     }
 
-    fn select_weighted(&mut self, available: &[usize]) -> usize {
-        let total: i64 = available.iter().map(|&i| self.backends[i].weight as i64).sum();
-        let mut best = available[0];
+    fn select_weighted(&mut self, available: &[usize]) -> Option<usize> {
+        // Zero weight nodes receive no traffic. If every available node has
+        // weight zero the pool has no capacity under this strategy.
+        let mut best: Option<usize> = None;
+        let mut total: i64 = 0;
         for &i in available {
-            self.backends[i].current_weight += self.backends[i].weight as i64;
-            if self.backends[i].current_weight > self.backends[best].current_weight {
-                best = i;
+            if self.backends[i].weight == 0 {
+                continue;
+            }
+            total += self.backends[i].weight as i64;
+            let w = &mut self.backends[i];
+            w.current_weight += w.weight as i64;
+            match best {
+                None => best = Some(i),
+                Some(b) => {
+                    if w.current_weight > self.backends[b].current_weight {
+                        best = Some(i);
+                    }
+                }
             }
         }
-        self.backends[best].current_weight -= total;
+        if let Some(b) = best {
+            self.backends[b].current_weight -= total;
+        }
         best
     }
 
@@ -303,7 +325,9 @@ impl Pool {
     }
 
     /// Feed a failed outcome back in. May trip the breaker or eject the backend
-    /// as an outlier once the consecutive failure threshold is reached.
+    /// as an outlier once the consecutive failure threshold is reached. A single
+    /// continuous ejection counts exactly once: failures that land while the
+    /// backend is already ejected neither re count nor extend the cooldown.
     pub fn record_failure(&mut self, idx: usize, now: u64) {
         let outlier_threshold = self.health.outlier_consecutive_failures;
         let ejection_base = self.health.ejection_base_ms;
@@ -311,8 +335,9 @@ impl Pool {
         b.served += 1;
         b.breaker.on_failure(now);
         b.outlier_failures += 1;
-        if b.outlier_failures >= outlier_threshold {
-            b.ejected_until = Some(now + ejection_base);
+        let already_ejected = matches!(b.ejected_until, Some(until) if now < until);
+        if b.outlier_failures >= outlier_threshold && !already_ejected {
+            b.ejected_until = Some(now.saturating_add(ejection_base));
             b.ejections += 1;
         }
     }
@@ -323,10 +348,14 @@ impl Pool {
         let up_thresh = self.health.healthy_probe_threshold;
         let down_thresh = self.health.unhealthy_probe_threshold;
         for b in &mut self.backends {
-            if now.saturating_sub(b.last_probe) < interval && b.last_probe != 0 {
+            let due = match b.last_probe {
+                None => true,
+                Some(t) => now.saturating_sub(t) >= interval,
+            };
+            if !due {
                 continue;
             }
-            b.last_probe = now.max(1);
+            b.last_probe = Some(now);
             let live = b.upstream.probe();
             if live {
                 b.probe_successes += 1;
@@ -465,3 +494,4 @@ mod tests {
         assert!(reply.outcome.is_err());
     }
 }
+

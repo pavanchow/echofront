@@ -56,6 +56,7 @@ fn breaker_cfg() -> BreakerConfig {
         failure_threshold: 5,
         success_threshold: 2,
         cooldown_ms: 3_000,
+        half_open_max_calls: 2,
     }
 }
 
