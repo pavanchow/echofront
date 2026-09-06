@@ -53,8 +53,7 @@ pub trait Upstream {
     fn probe(&self) -> bool {
         self.send(&Request::probe())
             .outcome
-            .map(|r| !r.is_server_error())
-            .unwrap_or(false)
+            .is_ok_and(|r| !r.is_server_error())
     }
 }
 
@@ -128,11 +127,13 @@ impl MockUpstream {
         m
     }
 
+    #[must_use]
     pub fn with_default(mut self, step: Step) -> Self {
         self.default = step;
         self
     }
 
+    #[must_use]
     pub fn with_probe_default(mut self, live: bool) -> Self {
         self.probe_default = live;
         self

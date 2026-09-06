@@ -8,13 +8,13 @@ use std::collections::BTreeMap;
 pub fn fnv1a_64(bytes: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for &b in bytes {
-        h ^= b as u64;
+        h ^= u64::from(b);
         h = h.wrapping_mul(0x0000_0100_0000_01b3);
     }
     h
 }
 
-/// SplitMix64 finalizer. Used to spread virtual node positions uniformly around
+/// `SplitMix64` finalizer. Used to spread virtual node positions uniformly around
 /// the ring so no member is starved of the key space.
 fn mix64(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -47,7 +47,7 @@ impl ConsistentHashRing {
         for (id, name) in members {
             let base = fnv1a_64(name.as_bytes());
             for v in 0..self.vnodes {
-                let point = mix64(base.wrapping_add(mix64(v as u64)));
+                let point = mix64(base.wrapping_add(mix64(u64::from(v))));
                 self.ring.insert(point, *id);
             }
         }
@@ -79,6 +79,8 @@ impl ConsistentHashRing {
 }
 
 #[cfg(test)]
+// Percent math on small bounded counts in these tests.
+#[allow(clippy::cast_precision_loss)]
 mod tests {
     use super::*;
 

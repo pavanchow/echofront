@@ -211,6 +211,8 @@ fn demo() {
     }
 }
 
+// Percent and bar display math on bounded counts.
+#[allow(clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_truncation)]
 fn spread(strategy: Strategy) {
     let n = 6000usize;
     let (mut proxy, _clock) = build_proxy(strategy, &[("A", 1), ("B", 1), ("C", 3), ("D", 1)]);
@@ -232,9 +234,7 @@ fn spread(strategy: Strategy) {
     for row in pool.distribution(proxy.now()) {
         let bar = "#".repeat((row.served_share_pct / 2.0) as usize);
         let ewma = row
-            .ewma_milli
-            .map(|m| format!("{:>7.1}", m as f64 / 1000.0))
-            .unwrap_or_else(|| "      -".to_string());
+            .ewma_milli.map_or_else(|| "      -".to_string(), |m| format!("{:>7.1}", m as f64 / 1000.0));
         println!(
             "  {:<3} {:>6} {:>6} {:>6.1}% {:>6.1}% {:>6.3}% {}  {}",
             row.name, row.weight, row.served, row.served_share_pct, row.expected_share_pct,

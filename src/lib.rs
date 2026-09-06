@@ -22,6 +22,11 @@
 //! The core invariant is that the proxy never selects an unhealthy upstream, an
 //! ejected outlier, or one whose circuit is open.
 
+// A getter heavy engine: marking every state accessor must_use is noise, the
+// interesting calls (select, dispatch, handle) already have failure modes that
+// callers check.
+#![allow(clippy::must_use_candidate)]
+
 pub mod breaker;
 pub mod clock;
 pub mod ewma;

@@ -77,6 +77,8 @@ impl RetryBudget {
         self.denied
     }
 
+    // Milli tokens are bounded by max_milli, far below the f64 precision limit.
+    #[allow(clippy::cast_precision_loss)]
     pub fn tokens(&self) -> f64 {
         self.tokens_milli as f64 / 1000.0
     }

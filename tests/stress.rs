@@ -1,5 +1,5 @@
-//! Max scale stress harness. Every scenario is env scaled: ECHOFRONT_STRESS_OPS
-//! sets the workload size (small default so CI stays fast) and ECHOFRONT_STRESS_NODES
+//! Max scale stress harness. Every scenario is env scaled: `ECHOFRONT_STRESS_OPS`
+//! sets the workload size (small default so CI stays fast) and `ECHOFRONT_STRESS_NODES`
 //! sets the pool size. Same seed gives the same timeline every run. The scenarios
 //! drive the engine through hundreds of thousands to millions of requests with
 //! flapping nodes, breaker churn, nested retries, sticky churn, and clock jumps,
@@ -7,13 +7,22 @@
 //!
 //! Invariants checked continuously:
 //! 1. A selection is never an unhealthy, ejected, or open circuit backend.
-//! 2. Least connections accounting: in_flight returns to zero after paired
+//! 2. Least connections accounting: `in_flight` returns to zero after paired
 //!    begin/end and never goes negative.
 //! 3. The breaker never diverges from an independent reference model.
 //! 4. Retries granted never exceed the token bucket arithmetic bound.
 //! 5. A continuous ejection counts as exactly one ejection.
 //! 6. Weighted spread matches weights exactly over full smooth WRR cycles,
 //!    including odd weights like 1 vs 100, and zero weight is never selected.
+
+// Stress scenarios read best as one linear timeline and every counter here is
+// small and bounded, so the pedantic line count and cast lints are noise.
+#![allow(clippy::too_many_lines)]
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap
+)]
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -188,8 +197,8 @@ fn stress_mixed_chaos_large_pool() {
         for i in 0..n_nodes {
             let node_seed = seed() ^ (i as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
             let up = scripted_upstream(&format!("n{i}"), script_len, node_seed);
+            // Deliberately uneven weights: pairs of 1 and 100 for the spread.
             let weight = match i % 5 {
-                0 => 1,
                 1 => 100,
                 2 => 7,
                 3 => 3,
@@ -235,7 +244,7 @@ fn stress_mixed_chaos_large_pool() {
             };
             let ejections_before: Vec<u64> = {
                 let pool = proxy.pool("svc").unwrap();
-                pool.backends().iter().map(|b| b.ejections()).collect()
+                pool.backends().iter().map(echofront::Backend::ejections).collect()
             };
 
             let session = if strategy == Strategy::ConsistentHash {
@@ -332,8 +341,8 @@ fn stress_mixed_chaos_large_pool() {
             // Invariant 4: retry token arithmetic bound.
             let retried = res.attempts.iter().filter(|a| a.is_retry).count() as u64;
             total_retries_seen += retried;
-            let reqs = r + 1;
-            let bound = (retry_cfg.max_milli + reqs as i64 * retry_cfg.deposit_milli)
+            let served_reqs = r + 1;
+            let bound = (retry_cfg.max_milli + served_reqs as i64 * retry_cfg.deposit_milli)
                 / retry_cfg.retry_cost_milli;
             assert!(
                 (total_retries_seen as i64) <= bound,
@@ -346,7 +355,7 @@ fn stress_mixed_chaos_large_pool() {
         }
 
         let pool = proxy.pool("svc").unwrap();
-        let total: u64 = pool.backends().iter().map(|b| b.served()).sum();
+        let total: u64 = pool.backends().iter().map(echofront::Backend::served).sum();
         println!(
             "[chaos] strategy={} requests={n_reqs} nodes={n_nodes} attempts_served={total} \
              retries={total_retries_seen} max_attempts={max_attempts_seen}",
@@ -390,26 +399,23 @@ fn stress_single_node_total_outage() {
         progress("solo", r, n);
         now += if rng.below(300) == 0 { 9_999_999 } else { rng.below(50) };
         p.poll(now);
-        match p.select(now, None, &[]) {
-            Some(idx) => {
-                assert!(p.backend(idx).is_available(now));
-                p.begin(idx);
-                let reply = p.dispatch(idx, &Request::get("/"));
-                match reply.outcome {
-                    Ok(_) => p.record_success(idx, now),
-                    Err(_) => p.record_failure(idx, now),
-                }
-                p.end(idx);
-                live_windows += 1;
+        if let Some(idx) = p.select(now, None, &[]) {
+            assert!(p.backend(idx).is_available(now));
+            p.begin(idx);
+            let reply = p.dispatch(idx, &Request::get("/"));
+            match reply.outcome {
+                Ok(_) => p.record_success(idx, now),
+                Err(_) => p.record_failure(idx, now),
             }
-            None => {
-                outage_windows += 1;
-                for b in p.backends() {
-                    assert!(
-                        !b.is_available(now),
-                        "select returned None but a node was available"
-                    );
-                }
+            p.end(idx);
+            live_windows += 1;
+        } else {
+            outage_windows += 1;
+            for b in p.backends() {
+                assert!(
+                    !b.is_available(now),
+                    "select returned None but a node was available"
+                );
             }
         }
         for b in p.backends() {
@@ -461,15 +467,12 @@ fn stress_all_fail_then_recover_scrambled() {
             );
             p.begin(idx);
             let reply = p.dispatch(idx, &Request::get("/"));
-            match reply.outcome {
-                Ok(_) => {
-                    p.record_success(idx, now);
-                    recovered_picks += 1;
-                }
-                Err(_) => {
-                    p.record_failure(idx, now);
-                    failing_picks += 1;
-                }
+            if reply.outcome.is_ok() {
+                p.record_success(idx, now);
+                recovered_picks += 1;
+            } else {
+                p.record_failure(idx, now);
+                failing_picks += 1;
             }
             p.end(idx);
         }

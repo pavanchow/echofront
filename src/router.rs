@@ -21,7 +21,7 @@ impl Route {
         service: impl Into<String>,
     ) -> Self {
         Self {
-            host: host.map(|h| h.to_ascii_lowercase()),
+            host: host.map(str::to_ascii_lowercase),
             path_prefix: path_prefix.into(),
             service: service.into(),
         }
@@ -49,8 +49,7 @@ fn path_prefix_matches(prefix: &str, path: &str) -> bool {
         return false;
     }
     match path_head.as_bytes().get(prefix.len()) {
-        None => true,
-        Some(b'/') => true,
+        None | Some(b'/') => true,
         _ => prefix.ends_with('/'),
     }
 }

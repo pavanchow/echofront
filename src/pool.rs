@@ -169,7 +169,7 @@ impl Backend {
     }
 
     /// Available means routable right now: healthy, not ejected, breaker allows
-    /// the call (including the half open trial cap), and under HalfOpen a trial
+    /// the call (including the half open trial cap), and under `HalfOpen` a trial
     /// slot is free.
     pub fn is_available(&self, now: u64) -> bool {
         self.healthy && !self.is_ejected(now) && self.breaker.admits(now, self.in_flight)
@@ -320,7 +320,7 @@ impl Pool {
         }
         // When no node qualifies the sum is zero too, so the max keeps the
         // division safe and the mean at zero.
-        (sum / n.max(1)) as u64
+        u64::try_from(sum / n.max(1)).unwrap_or(u64::MAX)
     }
 
     fn available_indices(&self, now: u64, exclude: &[usize]) -> Vec<usize> {
@@ -388,7 +388,7 @@ impl Pool {
     /// always 100, so this is exactly the configured weight.
     fn weighted_score(&self, i: usize) -> i64 {
         let b = &self.backends[i];
-        b.weight as i64 * i64::from(b.ramp_percent)
+        i64::from(b.weight) * i64::from(b.ramp_percent)
     }
 
     fn select_least_conn(&self, available: &[usize]) -> usize {
@@ -402,9 +402,8 @@ impl Pool {
     }
 
     fn select_hash(&mut self, available: &[usize], key: Option<&str>) -> usize {
-        let key = match key {
-            Some(k) => k,
-            None => return self.select_round_robin(available),
+        let Some(key) = key else {
+            return self.select_round_robin(available);
         };
         if self.ring_signature != available || self.ring.is_empty() {
             let members: Vec<(usize, &str)> = available
@@ -426,7 +425,7 @@ impl Pool {
         b.in_flight = b.in_flight.saturating_sub(1);
     }
 
-    /// Send a request to a chosen backend. Does not touch in_flight, breaker, or
+    /// Send a request to a chosen backend. Does not touch `in_flight`, breaker, or
     /// health. The proxy owns that lifecycle via `begin`, `record_*`, and `end`.
     pub fn dispatch(&self, idx: usize, req: &crate::http::Request) -> UpstreamReply {
         self.backends[idx].upstream.send(req)
@@ -463,6 +462,8 @@ impl Pool {
 
     /// Distribution report: what each node actually received versus its share
     /// of the currently available effective weight, plus EWMA and ramp state.
+    // Percent display math on bounded counts, far below the f64 precision limit.
+    #[allow(clippy::cast_precision_loss)]
     pub fn distribution(&self, now: u64) -> Vec<DistributionRow> {
         let total_served: u64 = self.backends.iter().map(|b| b.served).sum();
         let available = self.available_indices(now, &[]);
@@ -552,6 +553,8 @@ impl Pool {
 }
 
 #[cfg(test)]
+// Percent math on small bounded counts in these tests.
+#[allow(clippy::cast_precision_loss)]
 mod tests {
     use super::*;
     use crate::upstream::{MockUpstream, Step, UpstreamError};

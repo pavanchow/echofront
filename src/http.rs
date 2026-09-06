@@ -83,6 +83,7 @@ impl Request {
         Request::new(Method::Get, path)
     }
 
+    #[must_use]
     pub fn with_header(mut self, name: impl Into<String>, value: impl Into<String>) -> Self {
         self.headers.push((name.into(), value.into()));
         self
@@ -107,6 +108,12 @@ impl Request {
 
     /// Parse a raw HTTP/1.1 request. Headers are split on the first colon and
     /// trimmed. The body is everything after the blank line.
+    ///
+    /// # Errors
+    ///
+    /// Returns `ParseError::Empty` for an empty or blank request and
+    /// `ParseError::MalformedRequestLine` or `ParseError::MalformedHeader` when
+    /// the request line or a header line cannot be split.
     pub fn parse(raw: &str) -> Result<Request, ParseError> {
         let (head, body) = match raw.split_once("\r\n\r\n") {
             Some((h, b)) => (h, b),
@@ -165,6 +172,7 @@ impl Response {
         }
     }
 
+    #[must_use]
     pub fn with_body(mut self, body: impl Into<Vec<u8>>) -> Self {
         self.body = body.into();
         self

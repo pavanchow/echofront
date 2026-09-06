@@ -18,11 +18,11 @@ pub enum BreakerState {
 pub struct BreakerConfig {
     /// Consecutive failures in Closed that trip the breaker.
     pub failure_threshold: u32,
-    /// Consecutive successes in HalfOpen that close the breaker.
+    /// Consecutive successes in `HalfOpen` that close the breaker.
     pub success_threshold: u32,
-    /// How long Open lasts before moving to HalfOpen.
+    /// How long Open lasts before moving to `HalfOpen`.
     pub cooldown_ms: u64,
-    /// How many calls may be in flight concurrently while HalfOpen. One is the
+    /// How many calls may be in flight concurrently while `HalfOpen`. One is the
     /// classic canary trial. Zero is treated as one.
     pub half_open_max_calls: u32,
 }
@@ -68,7 +68,7 @@ impl CircuitBreaker {
         self.trips
     }
 
-    /// Promote Open to HalfOpen once the cooldown has elapsed. Idempotent, must
+    /// Promote Open to `HalfOpen` once the cooldown has elapsed. Idempotent, must
     /// be called with the current time before reading state or callability.
     pub fn poll(&mut self, now: u64) {
         if self.state == BreakerState::Open && now.saturating_sub(self.opened_at) >= self.cfg.cooldown_ms
@@ -92,8 +92,8 @@ impl CircuitBreaker {
     }
 
     /// Whether one more call may enter given how many are already in flight on
-    /// this upstream. While HalfOpen, concurrent trial calls are capped at
-    /// half_open_max_calls so the trial gets a clean signal.
+    /// this upstream. While `HalfOpen`, concurrent trial calls are capped at
+    /// `half_open_max_calls` so the trial gets a clean signal.
     pub fn admits(&self, now: u64, in_flight: u32) -> bool {
         if !self.is_callable(now) {
             return false;

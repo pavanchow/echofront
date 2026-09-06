@@ -150,8 +150,8 @@ impl Proxy {
 
     fn sticky_key(&self, req: &Request) -> Option<String> {
         req.header(&self.sticky_header)
-            .map(|s| s.to_string())
-            .or_else(|| req.host().map(|h| h.to_string()))
+            .map(std::string::ToString::to_string)
+            .or_else(|| req.host().map(std::string::ToString::to_string))
     }
 
     /// Handle one request end to end: route, select, send, retry and failover.
@@ -175,16 +175,13 @@ impl Proxy {
         let key = self.sticky_key(req);
         let max_retries = self.budget.max_retries_per_request();
 
-        let pool = match self.pools.get_mut(&service) {
-            Some(p) => p,
-            None => {
-                return HandleResult {
-                    service: Some(service),
-                    selected: None,
-                    response: Err(ProxyError::NoRoute),
-                    attempts: Vec::new(),
-                }
-            }
+        let Some(pool) = self.pools.get_mut(&service) else {
+            return HandleResult {
+                service: Some(service),
+                selected: None,
+                response: Err(ProxyError::NoRoute),
+                attempts: Vec::new(),
+            };
         };
         pool.poll(now);
 
@@ -194,21 +191,18 @@ impl Proxy {
         let mut attempt_no: u32 = 0;
 
         loop {
-            let idx = match pool.select(now, key.as_deref(), &tried) {
-                Some(i) => i,
-                None => {
-                    let err = if attempts.is_empty() {
-                        ProxyError::NoHealthyUpstream
-                    } else {
-                        ProxyError::AllAttemptsFailed(attempt_no)
-                    };
-                    return HandleResult {
-                        service: Some(service),
-                        selected: first_selected,
-                        response: Err(err),
-                        attempts,
-                    };
-                }
+            let Some(idx) = pool.select(now, key.as_deref(), &tried) else {
+                let err = if attempts.is_empty() {
+                    ProxyError::NoHealthyUpstream
+                } else {
+                    ProxyError::AllAttemptsFailed(attempt_no)
+                };
+                return HandleResult {
+                    service: Some(service),
+                    selected: first_selected,
+                    response: Err(err),
+                    attempts,
+                };
             };
             if first_selected.is_none() {
                 first_selected = Some(idx);

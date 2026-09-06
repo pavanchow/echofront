@@ -1,6 +1,6 @@
 //! The correctness gates. These are the load bearing proofs of Echofront's
-//! claims. They are bounded for CI and reproducible: set ECHOFRONT_FUZZ_OPS to
-//! change the workload size and ECHOFRONT_FUZZ_SEED to change the seed. Same seed
+//! claims. They are bounded for CI and reproducible: set `ECHOFRONT_FUZZ_OPS` to
+//! change the workload size and `ECHOFRONT_FUZZ_SEED` to change the seed. Same seed
 //! gives the same timeline every run.
 //!
 //! Gate 1: load balancing correctness (round robin cycle, weighted proportion,
@@ -8,6 +8,14 @@
 //! Gate 2: circuit breaker state machine vs an independent reference model.
 //! Gate 3: health checks over the injected clock eject and reinstate on schedule.
 //! Gate 4: the proxy never selects an unhealthy, ejected, or open circuit upstream.
+
+// Gate share math uses small bounded counters, far below the f64 precision
+// limit, so the pedantic cast lints are noise here.
+#![allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap
+)]
 
 use echofront::breaker::{BreakerConfig, BreakerState, CircuitBreaker};
 use echofront::clock::ManualClock;
@@ -79,7 +87,7 @@ fn gate1_weighted_matches_weights() {
     }
     let total_weight: u32 = weights.iter().map(|(_, w)| *w).sum();
     for (i, (_, w)) in weights.iter().enumerate() {
-        let expected = *w as f64 / total_weight as f64;
+        let expected = f64::from(*w) / f64::from(total_weight);
         let actual = counts[i] as f64 / n as f64;
         assert!(
             (actual - expected).abs() < 0.02,
@@ -1013,7 +1021,7 @@ fn gate6_ewma_scaled_fuzz_invariants_hold() {
         ejections_observed += p
             .backends()
             .iter()
-            .map(|b| b.ewma_ejections())
+            .map(echofront::Backend::ewma_ejections)
             .sum::<u64>();
         let _ = &ejected_before;
     }

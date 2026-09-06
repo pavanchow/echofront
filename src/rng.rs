@@ -1,7 +1,11 @@
-//! A tiny deterministic PRNG (SplitMix64) so the property and fuzz gates are
+//! A tiny deterministic PRNG (`SplitMix64`) so the property and fuzz gates are
 //! seedable and reproducible with no external crates.
 
-/// SplitMix64. Same seed produces the same stream on every platform.
+// A PRNG by nature casts wide integers around: the unit float discards low bits
+// by design and the index bound is runtime small.
+#![allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
+
+/// `SplitMix64`. Same seed produces the same stream on every platform.
 #[derive(Clone)]
 pub struct Rng {
     state: u64,

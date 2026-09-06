@@ -10,7 +10,7 @@
 #[derive(Clone, Copy, Debug)]
 pub struct EwmaConfig {
     /// Smoothing factor in milli units. Each new sample moves the EWMA by
-    /// alpha_milli / 1000 of the gap. 250 means one quarter per sample.
+    /// `alpha_milli` / 1000 of the gap. 250 means one quarter per sample.
     pub alpha_milli: u64,
     /// Eject when a node EWMA exceeds the pool mean by this factor in milli
     /// units. 3000 means three times the pool mean.
