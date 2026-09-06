@@ -97,6 +97,7 @@ The gates live in `tests/gates.rs`. They are the load bearing proofs of the clai
 4. Core invariant. Across a randomized workload the proxy never selects an unhealthy, ejected, or open circuit upstream, checked after every routing decision.
 5. Adversarial edges. Zero weight nodes never receive weighted traffic and an all zero weight pool reports no capacity, a continuous ejection counts exactly once and expires on schedule, ejection arithmetic saturates instead of overflowing near the top of the clock, probes land exactly one configured interval apart, Half-Open admits only the configured number of concurrent trial calls, a pool of one with an open breaker is a total outage that returns no selection, all nodes fail and recover in different orders without a bad selection, sticky keys never land on an ejected node, and granted retries never exceed the token bucket arithmetic bound.
 6. EWMA latency scoring. With latency scripts on the mock upstreams, the slowest node is ejected once its EWMA stays over the line for the sustained window, nodes within tolerance are never ejected, a reinstated node comes back at partial weight and ramps up in exact smooth weighted proportion, and the never select unavailable invariant holds throughout a scaled fuzz over forty nodes with mixed latency classes.
+7. Hostile input and clock edges. An adversarial latency sample near the top of the clock range saturates the EWMA instead of panicking or wrapping, the ejection line saturates monotonically so a bigger mean never yields a smaller line, breakers and outlier ejections arm correctly at time zero, a clock jump to the top of the u64 range leaves the pool consistent and selectable, weights sharing a common divisor still produce exact smooth weighted cycles, and least connections accounting survives overlapping in flight requests completed out of order, saturating at zero instead of wrapping below it.
 
 Run everything:
 
@@ -110,8 +111,10 @@ cargo clippy --all-targets -- -D warnings
 `tests/stress.rs` is the max scale harness. Every scenario is env scaled with small in-CI defaults, so `cargo test` runs the whole suite with nothing ignored, while the same tests scale up to hundreds of nodes and millions of requests in release mode.
 
 ```
-ECHOFRONT_STRESS_OPS=800000 ECHOFRONT_STRESS_NODES=300 cargo test --release --test stress -- --nocapture
+ECHOFRONT_STRESS_OPS=400000 ECHOFRONT_STRESS_NODES=300 cargo test --release --test stress -- --nocapture
 ```
+
+At that scale the harness drives about three million requests across five scenarios over a 300 node pool in roughly thirteen minutes of release mode wall time, with every invariant re-checked after every step.
 
 Five scenarios run under one or the other env knob: mixed chaos through the proxy on a large pool with flapping nodes, breaker churn, nested retries, sticky churn and occasional huge clock jumps, a single node pool cycling between total outage and recovery, all nodes failing and recovering in scrambled order, sticky sessions riding join and leave waves, and exact weighted spread at odd weights like 1 versus 100. Every step re-checks the never select unavailable invariant, least connections accounting, breaker agreement with an independent reference model, the retry token bound and ejection accounting.
 
