@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Echofront Playground</title>
+<link rel="icon" type="image/svg+xml" href="logo.svg">
 <style>
 :root {
   --bg: #f2f2f7;
@@ -70,6 +71,24 @@ header.hero {
   text-align: center;
   padding: 20px 0 8px;
 }
+.howto > details > summary {
+  cursor: pointer;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  list-style: none;
+  padding: 4px 0;
+}
+.howto > details > summary::-webkit-details-marker { display: none; }
+.howto > details > summary::before {
+  content: "\25B8";
+  display: inline-block;
+  margin-right: 10px;
+  color: var(--accent);
+  font-size: 16px;
+  transition: transform .15s;
+}
+.howto > details[open] > summary::before { transform: rotate(90deg); }
 header.hero h1 {
   font-size: 40px;
   margin: 0 0 6px;
@@ -301,13 +320,15 @@ input.key:focus { outline: 2px solid var(--accent-soft); border-color: var(--acc
 <div class="wrap">
 
   <header class="hero">
+    <img src="logo.svg" alt="Echofront logo" width="72" height="72">
     <h1>Echofront</h1>
     <p>A resilience focused layer 7 reverse proxy and load balancer. This playground is a faithful JavaScript reimplementation of the engine so you can watch load balancing, health, circuit breaking, retries, and failover behave in real time.</p>
     <a class="ghlink" href="https://github.com/pavanchow/echofront" target="_blank" rel="noopener">github.com/pavanchow/echofront</a>
   </header>
 
   <section class="card howto">
-    <h2>How to use this playground</h2>
+    <details>
+    <summary>How to use this playground</summary>
     <p>Everything below is live. The clock advances on its own and every request flows through the same rules the real proxy uses. Here is what each control does.</p>
     <ul>
       <li><b>Strategy</b> picks how the proxy chooses a node: round robin, weighted (smooth weighted round robin), least connections, or sticky (consistent hashing). Choosing sticky reveals a key field.</li>
@@ -336,6 +357,7 @@ input.key:focus { outline: 2px solid var(--accent-soft); border-color: var(--acc
       <li>Flip node C back to <b>Healthy</b>. After the ejection window and the breaker cooldown it becomes <b>Half Open</b>, takes trial requests, and returns to <b>Closed</b>.</li>
       <li>Switch to <b>sticky</b>, type a key like user-3, and press Send 1 a few times. It sticks to one node. Fail that node and only its keys remap.</li>
     </ol>
+    </details>
   </section>
 
   <section class="card">

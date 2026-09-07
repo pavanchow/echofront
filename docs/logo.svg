@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="Echofront logo">
+  <defs>
+    <linearGradient id="ef-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0a84ff"/>
+      <stop offset="1" stop-color="#0a3d8f"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="26" fill="url(#ef-bg)"/>
+  <!-- distribution links from the front to the pool -->
+  <g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" opacity=".8">
+    <path d="M40 64H60"/>
+    <path d="M60 64C74 64 74 34 88 34"/>
+    <path d="M60 64H88"/>
+    <path d="M60 64C74 64 74 94 88 94"/>
+  </g>
+  <!-- the proxy front -->
+  <circle cx="34" cy="64" r="11" fill="#fff"/>
+  <!-- backend pool: two healthy, one failing (ejected) -->
+  <circle cx="94" cy="34" r="10" fill="#34c759"/>
+  <circle cx="94" cy="64" r="10" fill="#34c759"/>
+  <circle cx="94" cy="94" r="10" fill="#ff453a"/>
+</svg>

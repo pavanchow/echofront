@@ -1,5 +1,7 @@
 # Echofront
 
+<img src="docs/logo.svg" alt="Echofront logo" width="96">
+
 Echofront is a resilience focused layer 7 reverse proxy and load balancer built from the Rust standard library only. Zero external dependencies, edition 2021.
 
 Its whole reason to exist is the hard part of fronting a pool of backends: spreading load well, noticing when a backend goes bad, taking it out of rotation, retrying somewhere healthy without amplifying an incident, and letting it back in when it recovers. Every one of those behaviors runs over an injected clock and a backend trait, so the entire system is deterministic and testable without a single real socket.
