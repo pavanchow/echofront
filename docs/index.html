@@ -3,25 +3,32 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Echofront: a resilient layer 7 reverse proxy and load balancer in Rust</title>
-<meta name="description" content="Echofront by Pavan Nallamothu: a resilience-focused layer 7 reverse proxy and load balancer built from the Rust standard library only, zero external dependencies. Load balancing, health checking, circuit breaking, retries, and failover over an injected clock, so the whole system is deterministic and testable without a real socket.">
-<meta name="author" content="Pavan Nallamothu (pavanchow)">
-<meta name="keywords" content="reverse proxy, load balancer, layer 7 proxy, circuit breaker, outlier ejection, health check, retry budget, failover, consistent hashing, weighted round robin, EWMA latency, deterministic testing, injected clock, Rust, zero dependencies, Pavan Nallamothu, pavanchow">
+<title>Echofront: a layer 7 reverse proxy and load balancer in Rust | Pavan Nallamothu</title>
+<meta name="description" content="Echofront is a resilient layer 7 reverse proxy and load balancer in Rust with health checks, circuit breaking, outlier ejection, retries, and failover, by Pavan Nallamothu.">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+<meta name="author" content="Pavan Nallamothu">
+<meta name="keywords" content="reverse proxy in Rust, load balancer in Rust, layer 7 proxy, circuit breaker, outlier ejection, health check, retry budget, failover, consistent hashing, weighted round robin, EWMA latency, deterministic testing, injected clock, zero dependencies, echofront, Pavan Nallamothu, pavanchow">
 <link rel="canonical" href="https://pavanchow.github.io/echofront/">
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <link rel="author" href="https://github.com/pavanchow">
 <meta property="og:type" content="website">
-<meta property="og:title" content="Echofront: a resilient layer 7 reverse proxy and load balancer in Rust">
-<meta property="og:description" content="Load balancing, health checks, circuit breaking, retries, and failover in one dependency-free Rust crate. Flip a backend to failing and watch it eject, fail over, and recover. By Pavan Nallamothu.">
+<meta property="og:site_name" content="Pavan Nallamothu">
+<meta property="og:locale" content="en_US">
+<meta property="og:title" content="Echofront: a layer 7 reverse proxy and load balancer in Rust | Pavan Nallamothu">
+<meta property="og:description" content="Load balancing, health checks, circuit breaking, retries, and failover in one dependency-free Rust crate. Flip a backend to failing and watch it eject, fail over, and recover.">
 <meta property="og:url" content="https://pavanchow.github.io/echofront/">
-<meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Echofront: a resilient layer 7 reverse proxy and load balancer in Rust">
+<meta property="og:image" content="https://pavanchow.github.io/echofront/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Echofront by Pavan Nallamothu">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Echofront: a layer 7 reverse proxy and load balancer in Rust | Pavan Nallamothu">
 <meta name="twitter:description" content="A resilience-focused layer 7 proxy: weighted and sticky load balancing, circuit breakers, outlier ejection, and capped retries, all deterministic under a seed.">
+<meta name="twitter:image" content="https://pavanchow.github.io/echofront/og-image.png">
+<meta name="twitter:creator" content="@pavanchow">
+<meta name="twitter:site" content="@pavanchow">
 <script type="application/ld+json">
-{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Echofront","applicationCategory":"DeveloperApplication","operatingSystem":"Cross-platform","softwareVersion":"0.1.0","description":"Echofront is a resilience-focused layer 7 reverse proxy and load balancer built from the Rust standard library only, with zero external dependencies. It handles load balancing, health checking, circuit breaking, retries with a capped budget, and failover, all running over an injected clock and a backend trait so the system is deterministic and testable without a real socket.","url":"https://pavanchow.github.io/echofront/","author":{"@type":"Person","name":"Pavan Nallamothu"},"programmingLanguage":"Rust","codeRepository":"https://github.com/pavanchow/echofront","license":"https://opensource.org/licenses/MIT"}
-</script>
-<script type="application/ld+json">
-{"@context":"https://schema.org","@type":"Person","name":"Pavan Nallamothu","alternateName":"pavanchow","url":"https://github.com/pavanchow","sameAs":["https://github.com/pavanchow","https://hackerone.com/pavanchow"]}
+{"@context":"https://schema.org","@graph":[{"@type":"SoftwareApplication","name":"Echofront","alternateName":"Echofront proxy","applicationCategory":"DeveloperApplication","operatingSystem":"Linux, macOS, Windows","description":"Echofront is a resilience-focused layer 7 reverse proxy and load balancer built from the Rust standard library only, with zero external dependencies. It handles load balancing, health checking, circuit breaking, retries with a capped budget, and failover, all running over an injected clock and a backend trait so the system is deterministic and testable without a real socket.","url":"https://pavanchow.github.io/echofront/","image":"https://pavanchow.github.io/echofront/og-image.png","softwareVersion":"0.1.0","programmingLanguage":"Rust","codeRepository":"https://github.com/pavanchow/echofront","license":"https://opensource.org/licenses/MIT","datePublished":"2026-08-21","author":{"@id":"https://github.com/pavanchow#pavan"},"publisher":{"@id":"https://github.com/pavanchow#pavan"},"keywords":"reverse proxy, load balancer, layer 7 proxy, circuit breaker, outlier ejection, health check, retries, failover, consistent hashing, deterministic testing","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"featureList":["Layer 7 reverse proxy and load balancer","Weighted round robin and sticky consistent hashing","Active and passive health checking","Circuit breaking and outlier ejection","Capped retry budget with failover","EWMA latency tracking","Deterministic over an injected clock, testable without a real socket"]},{"@type":"Person","@id":"https://github.com/pavanchow#pavan","name":"Pavan Nallamothu","alternateName":"pavanchow","url":"https://github.com/pavanchow","jobTitle":"Software Engineer and Security Researcher","knowsAbout":["Rust","systems programming","compilers","operating systems","networking","databases","security research"],"sameAs":["https://github.com/pavanchow","https://hackerone.com/pavanchow"]},{"@type":"WebSite","name":"Echofront by Pavan Nallamothu","url":"https://pavanchow.github.io/echofront/","author":{"@id":"https://github.com/pavanchow#pavan"}},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Pavan Nallamothu","item":"https://github.com/pavanchow"},{"@type":"ListItem","position":2,"name":"Echofront","item":"https://pavanchow.github.io/echofront/"}]},{"@type":"WebPage","url":"https://pavanchow.github.io/echofront/","name":"Echofront: a layer 7 reverse proxy and load balancer in Rust | Pavan Nallamothu","isPartOf":{"@type":"WebSite","url":"https://pavanchow.github.io/echofront/"},"about":{"@type":"SoftwareApplication","name":"Echofront"},"author":{"@id":"https://github.com/pavanchow#pavan"},"inLanguage":"en"}]}
 </script>
 <style>
 :root {
@@ -597,6 +604,17 @@ cargo clippy --all-targets -- -D warnings</pre>
 <footer class="site">
   <p>Echofront is MIT licensed. Source, tests, and the design notes are on <a href="https://github.com/pavanchow/echofront">GitHub</a>.</p>
   <p>By <span class="name">Pavan Nallamothu</span>.</p>
+  <div style="max-width:760px;margin:30px auto 0;padding-top:26px;border-top:1px solid var(--border);text-align:left">
+    <p style="font-weight:600;color:var(--text);margin-bottom:10px">More open-source tools by Pavan Nallamothu</p>
+    <p style="line-height:2">
+      <a href="https://pavanchow.github.io/datagram/">Datagram, a TCP reliable-transport engine in Rust</a><br>
+      <a href="https://pavanchow.github.io/conduit/">Conduit, a from-scratch PostgreSQL wire-protocol driver in Rust</a><br>
+      <a href="https://pavanchow.github.io/conch/">Conch, a Unix shell in Rust built from scratch</a><br>
+      <a href="https://pavanchow.github.io/emberchip/">Emberchip, a deterministic RTOS simulator in Rust</a><br>
+      <a href="https://pavanchow.github.io/unweave/">Unweave, an EVM bytecode disassembler in Rust</a><br>
+      <a href="https://github.com/pavanchow">All of Pavan Nallamothu's open-source projects on GitHub</a>
+    </p>
+  </div>
 </footer>
 
 <script>
