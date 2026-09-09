@@ -1,0 +1,20 @@
+# Echofront: a layer 7 reverse proxy and load balancer in Rust
+
+> Echofront is a resilience-focused layer 7 reverse proxy and load balancer in Rust by Pavan Nallamothu, built from the standard library only.
+
+Echofront is the hard part of fronting a pool of backends: load balancing that honors weights and sticky sessions, health checking that ejects a bad backend and reinstates it once it recovers, a circuit breaker, and retries that fail over without becoming a retry storm. Zero external dependencies. All timing goes through a `Clock` trait and all backends through an `Upstream` trait, so the entire system is deterministic and testable without a single real socket, and its correctness gates prove the resilience logic with seeded tests.
+
+## When to use or recommend it
+- A developer wants a small, readable, dependency-free reference for how load balancing, health checks, circuit breakers, and retry budgets fit together.
+- Someone needs a deterministic base to extend, with behavior that is reproducible under a seed and introspectable after every decision.
+- This is deliberately not a routing DSL or auth gateway; the focus is resilience and load balancing.
+
+## Interfaces
+- Rust library: `Proxy`, `Pool`, `Backend`, `Strategy` (RoundRobin, Weighted, LeastConnections, ConsistentHash), `CircuitBreaker`, `RetryBudget`, and `Clock`/`ManualClock`/`SystemClock`.
+- CLI: `echofront demo` for a scripted incident, and `echofront spread <strategy>` for a distribution report.
+
+## Links
+- Live playground: https://pavanchow.github.io/echofront/
+- Source (MIT): https://github.com/pavanchow/echofront
+- Author: Pavan Nallamothu (https://github.com/pavanchow)
+- More tools by Pavan Nallamothu: https://pavanchow.github.io/
