@@ -6,6 +6,8 @@ Echofront is a resilience-focused layer 7 reverse proxy and load balancer in Rus
 
 **[Live demo](https://pavanchow.github.io/echofront/)** · MIT licensed · pure Rust
 
+Built from scratch by [Pavan Nallamothu](https://pavanchow.github.io/) ([LinkedIn](https://www.linkedin.com/in/pavanchow/), [GitHub](https://github.com/pavanchow)).
+
 ## The gap it fills
 
 A hand rolled proxy usually starts as a loop that picks a backend and forwards a request. That is fine until the day one backend starts returning 503s or hanging. Then you need, in a hurry, all of the following working together and correctly:
